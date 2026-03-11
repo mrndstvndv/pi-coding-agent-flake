@@ -1,0 +1,89 @@
+name: Update pi-coding-agent
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-pi:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v24
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Fetch latest npm version
+        id: fetch-version
+        run: |
+          LATEST_VERSION=$(npm view @mariozechner/pi-coding-agent version --json | tr -d '"\n')
+          echo "latest_version=$LATEST_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Latest version: $LATEST_VERSION"
+
+      - name: Extract current version
+        id: current-version
+        run: |
+          CURRENT_VERSION=$(jq -r '.dependencies["@mariozechner/pi-coding-agent"]' package/package.json)
+          echo "current_version=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Current version: $CURRENT_VERSION"
+
+      - name: Compare versions
+        id: compare
+        run: |
+          if [ "${{ steps.fetch-version.outputs.latest_version }}" = "${{ steps.current-version.outputs.current_version }}" ]; then
+            echo "Already up to date"
+            echo "needs_update=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "New version available: ${{ steps.fetch-version.outputs.latest_version }}"
+          echo "needs_update=true" >> "$GITHUB_OUTPUT"
+
+      - name: Update package manifest and lockfile
+        if: steps.compare.outputs.needs_update == 'true'
+        run: |
+          VERSION="${{ steps.fetch-version.outputs.latest_version }}"
+          jq '.dependencies["@mariozechner/pi-coding-agent"] = "'"$VERSION"'"' package/package.json > package/package.json.tmp
+          mv package/package.json.tmp package/package.json
+          cd package
+          npm install --package-lock-only
+
+      - name: Compute npm deps hash
+        if: steps.compare.outputs.needs_update == 'true'
+        id: npm-hash
+        run: |
+          HASH=$(nix shell nixpkgs#prefetch-npm-deps -c prefetch-npm-deps package/package-lock.json)
+          echo "hash=$HASH" >> "$GITHUB_OUTPUT"
+          echo "npmDepsHash: $HASH"
+
+      - name: Update flake hash
+        if: steps.compare.outputs.needs_update == 'true'
+        run: |
+          HASH="${{ steps.npm-hash.outputs.hash }}"
+          sed -i 's|npmDepsHash = ".*";|npmDepsHash = "'"$HASH"'";|' flake.nix
+
+      - name: Verify flake builds
+        if: steps.compare.outputs.needs_update == 'true'
+        run: |
+          nix flake check --no-build
+          nix build .#packages.x86_64-linux.default --no-link
+
+      - name: Commit and push
+        if: steps.compare.outputs.needs_update == 'true'
+        run: |
+          VERSION="${{ steps.fetch-version.outputs.latest_version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add flake.nix package/package.json package/package-lock.json
+          git commit -m "flake: update pi to $VERSION"
+          git push
