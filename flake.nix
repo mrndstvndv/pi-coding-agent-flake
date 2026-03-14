@@ -17,7 +17,7 @@
       forAllSystems = lib.genAttrs systems;
       packageManifest = builtins.fromJSON (builtins.readFile ./package/package.json);
       version = packageManifest.dependencies."@mariozechner/pi-coding-agent";
-      npmDepsHash = "sha256-fvmWA9qZsxF9YBVjalnGd96acmA69+7m418uUWarlh0=";
+      npmDepsHash = "sha256-Vfm1U2FVQCKgAluam4jEcLWpsuhZk8VvnFEyx9Tjbig=";
       mkPi = system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
