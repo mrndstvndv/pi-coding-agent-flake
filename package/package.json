@@ -3,6 +3,6 @@
   "private": true,
   "description": "Wrapper package for @mariozechner/pi-coding-agent",
   "dependencies": {
-    "@mariozechner/pi-coding-agent": "0.58.3"
+    "@mariozechner/pi-coding-agent": "0.58.4"
   }
 }
