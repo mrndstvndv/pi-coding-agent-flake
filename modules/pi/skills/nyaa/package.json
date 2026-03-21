@@ -1,0 +1,9 @@
+{
+  "name": "nyaa-skill",
+  "version": "1.0.0",
+  "description": "Nyaa.si CLI skill for searching and downloading anime torrents",
+  "type": "module",
+  "bin": {
+    "nyaa": "./nyaa"
+  }
+}

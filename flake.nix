@@ -18,6 +18,7 @@
       packageManifest = builtins.fromJSON (builtins.readFile ./package/package.json);
       version = packageManifest.dependencies."@mariozechner/pi-coding-agent";
       npmDepsHash = "sha256-NUsquuBQBoNvR8c0HwawyJXdIlT3WtUODagw1caF+oM=";
+
       mkPi = system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
@@ -55,20 +56,10 @@
         inherit version;
       };
 
-      packages = forAllSystems (system:
-        let
-          pi = mkPi system;
-        in
-        {
-          default = pi;
-          inherit pi;
-        });
+      homeManagerModules.default = import ./modules/pi/default.nix;
 
-      apps = forAllSystems (system: {
-        default = {
-          type = "app";
-          program = "${self.packages.${system}.default}/bin/pi";
-        };
+      packages = forAllSystems (system: {
+        pi = mkPi system;
       });
     };
 }

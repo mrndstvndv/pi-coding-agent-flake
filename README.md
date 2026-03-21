@@ -1,12 +1,11 @@
 # pi-coding-agent flake
 
-Standalone flake packaging `@mariozechner/pi-coding-agent` as a Nix package and app.
+Standalone flake packaging `@mariozechner/pi-coding-agent` as a Nix package and Home Manager module.
 
 ## Outputs
 
-- `packages.${system}.default`
 - `packages.${system}.pi`
-- `apps.${system}.default`
+- `homeManagerModules.default`
 - `lib.version`
 
 ## Local usage
@@ -14,6 +13,12 @@ Standalone flake packaging `@mariozechner/pi-coding-agent` as a Nix package and 
 ```nix
 piAgent.url = "path:./pkgs/pi-coding-agent-flake";
 piAgent.inputs.nixpkgs.follows = "nixpkgs";
+```
+
+Import the Home Manager module from this flake:
+
+```nix
+imports = [ inputs.piAgent.homeManagerModules.default ];
 ```
 
 ## Update workflow

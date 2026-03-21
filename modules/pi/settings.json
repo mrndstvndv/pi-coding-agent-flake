@@ -1,0 +1,12 @@
+{
+  "packages": [
+    "~/.pi/packages/nixdots-extensions"
+  ],
+  "lsp": {
+    "hookMode": "edit_write"
+  },
+  "defaultProvider": "opencode",
+  "defaultModel": "mimo-v2-pro-free",
+  "defaultThinkingLevel": "xhigh",
+  "hideThinkingBlock": false
+}

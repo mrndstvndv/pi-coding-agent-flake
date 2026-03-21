@@ -1,0 +1,25 @@
+{
+  "providers": {
+    "openrouter-qwen": {
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "apiKey": "OPENROUTER_API_KEY",
+      "api": "openai-completions",
+      "models": [
+        {
+          "id": "qwen/qwen3-next-80b-a3b-instruct:free",
+          "name": "Qwen3-Next 80B-A3B (Free)",
+          "reasoning": false,
+          "contextWindow": 262144,
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+        },
+        {
+          "id": "qwen/qwen3-coder:free",
+          "name": "Qwen3 Coder (Free)",
+          "reasoning": false,
+          "contextWindow": 262144,
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+        }
+      ]
+    }
+  }
+}

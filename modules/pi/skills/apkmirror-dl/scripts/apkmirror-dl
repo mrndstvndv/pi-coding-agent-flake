@@ -1,0 +1,339 @@
+#!/usr/bin/env -S uv run --script
+
+# /// script
+# requires-python = ">=3.9"
+# dependencies = ["cloudscraper", "beautifulsoup4", "requests"]
+# ///
+
+"""
+APKMirror Downloader CLI
+
+Download APKs from APKMirror by app URL or search query.
+
+Usage:
+    apkmirror-dl <apkmirror_url> [--output <path>]
+    apkmirror-dl --search <app_name> [--output <path>]
+
+Examples:
+    apkmirror-dl "https://www.apkmirror.com/apk/twitter/twitter/"
+    apkmirror-dl "https://www.apkmirror.com/apk/twitter/twitter/" -o twitter.apk
+    apkmirror-dl --search "youtube" --bundle
+"""
+
+import argparse
+import sys
+from dataclasses import dataclass
+from typing import cast
+
+import cloudscraper
+from bs4 import BeautifulSoup, Tag
+
+
+@dataclass
+class Version:
+    version: str
+    link: str
+
+
+@dataclass
+class Variant:
+    is_bundle: bool
+    link: str
+    architecture: str
+
+
+class FailedToFindElement(Exception):
+    def __init__(self, message=None) -> None:
+        self.message = f"Failed to find element{' ' + message if message is not None else ''}"
+        super().__init__(self.message)
+
+
+class FailedToFetch(Exception):
+    def __init__(self, url=None) -> None:
+        self.message = f"Failed to fetch{' ' + url if url is not None else ''}"
+        super().__init__(self.message)
+
+
+_scraper = None
+
+
+def get_scraper():
+    global _scraper
+    if _scraper is None:
+        _scraper = cloudscraper.create_scraper()
+        _scraper.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+        })
+    return _scraper
+
+
+def download_file(link: str, out: str, headers: dict | None = None):
+    """Download file from link to output path."""
+    import os
+
+    dir_name = os.path.dirname(out)
+    if dir_name:
+        os.makedirs(dir_name, exist_ok=True)
+
+    if os.path.exists(out):
+        print(f"{out} already exists, skipping download")
+        return
+
+    print(f"Downloading: {link}")
+    print(f"Output: {out}")
+
+    scraper = get_scraper()
+    with scraper.get(link, stream=True, headers=headers) as r:
+        r.raise_for_status()
+        with open(out, "wb") as f:
+            for chunk in r.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+
+    print(f"Download complete: {out}")
+
+
+def get_versions(url: str) -> list[Version]:
+    """Get versions from APKMirror app page."""
+    response = get_scraper().get(url)
+    if response.status_code != 200:
+        raise FailedToFetch(f"{url}: {response.status_code}")
+
+    bs4 = BeautifulSoup(response.text, "html.parser")
+    versions = bs4.find("div", attrs={"class": "listWidget"})
+
+    out: list[Version] = []
+    if versions is not None:
+        for versionRow in cast(Tag, versions).find_all("div", recursive=False)[1:]:
+            if versionRow is None:
+                continue
+
+            version = versionRow.find("span", {"class": "infoSlide-value"})
+            if version is None:
+                continue
+
+            version_str = version.string.strip()
+            link_tag = versionRow.find("a")
+            if link_tag is None:
+                continue
+
+            link = f"https://www.apkmirror.com{link_tag['href']}"
+            out.append(Version(version=version_str, link=link))
+
+    return out
+
+
+def get_variants(version: Version) -> list[Variant]:
+    """Get download variants for a specific version."""
+    url = version.link
+    variants_page = get_scraper().get(url)
+    if variants_page.status_code != 200:
+        raise FailedToFetch(url)
+
+    variants_page_body = BeautifulSoup(variants_page.content, "html.parser")
+
+    variants_table = variants_page_body.find("div", {"class": "table"})
+    if variants_table is None:
+        raise FailedToFindElement("variants table")
+
+    variants_table_rows = cast(Tag, variants_table).find_all("div", recursive=False)[1:]
+
+    variants: list[Variant] = []
+    for variant_row in variants_table_rows:
+        cells = variant_row.find_all("div", {"class": "table-cell"}, recursive=False)
+        if len(cells) == 0:
+            continue
+
+        is_bundle_tag = variant_row.find("span", {"class": "apkm-badge"})
+        is_bundle = False
+        if is_bundle_tag is not None:
+            is_bundle = is_bundle_tag.string.strip() == "BUNDLE"
+
+        architecture: str = cells[1].string if len(cells) > 1 else "unknown"
+        link_element = variant_row.find("a", {"class": "accent_color"})
+        if link_element is None:
+            continue
+
+        link: str = f"https://www.apkmirror.com{link_element.attrs['href']}"
+        variants.append(Variant(is_bundle=is_bundle, link=link, architecture=architecture))
+
+    return variants
+
+
+def download_apk(variant: Variant, path: str = "download.apk"):
+    """Download APK from variant link."""
+    url = variant.link
+
+    response = get_scraper().get(url)
+    if response.status_code != 200:
+        raise FailedToFetch(url)
+
+    response_body = BeautifulSoup(response.content, "html.parser")
+
+    download_button = response_body.find("a", {"class": "downloadButton"})
+    if download_button is None:
+        raise FailedToFindElement("Download button")
+
+    download_page_link = f"https://www.apkmirror.com/{cast(Tag, download_button).attrs['href']}"
+
+    download_page = get_scraper().get(download_page_link)
+    if download_page.status_code != 200:
+        raise FailedToFetch(download_page_link)
+
+    download_page_body = BeautifulSoup(download_page.content, "html.parser")
+
+    direct_link = download_page_body.find("a", {"rel": "nofollow"})
+    if direct_link is None:
+        raise FailedToFindElement("download link")
+
+    direct_link_href = cast(Tag, direct_link).attrs["href"]
+    direct_link_url = f"https://www.apkmirror.com{direct_link_href}"
+    print(f"Direct link: {direct_link_url}")
+
+    download_file(direct_link_url, path, headers={"Referer": download_page_link})
+
+
+def search_apps(query: str) -> list[dict]:
+    """Search for apps on APKMirror."""
+    search_url = f"https://www.apkmirror.com/?s={query.replace(' ', '+')}&post_type=app_release"
+    response = get_scraper().get(search_url)
+    if response.status_code != 200:
+        raise FailedToFetch(search_url)
+
+    bs4 = BeautifulSoup(response.text, "html.parser")
+    results = []
+
+    app_list = bs4.find("div", {"class": "listWidget"})
+    if app_list is None:
+        return results
+
+    for item in cast(Tag, app_list).find_all("div", recursive=False)[1:]:
+        link_tag = item.find("a", {"class": "fontBlack"})
+        if link_tag is None:
+            continue
+
+        name = link_tag.string.strip() if link_tag.string else "Unknown"
+        href = link_tag.attrs.get("href", "")
+        link = f"https://www.apkmirror.com{href}" if href.startswith("/") else href
+
+        results.append({"name": name, "link": link})
+
+    return results
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Download APKs from APKMirror",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+    apkmirror-dl "https://www.apkmirror.com/apk/twitter/twitter/"
+    apkmirror-dl "https://www.apkmirror.com/apk/twitter/twitter/" -o twitter.apk
+    apkmirror-dl --search "youtube"
+        """
+    )
+
+    parser.add_argument("url", nargs="?", help="APKMirror app URL")
+    parser.add_argument("-s", "--search", help="Search for an app by name")
+    parser.add_argument("-o", "--output", help="Output file path")
+    parser.add_argument("--bundle", action="store_true", help="Prefer bundle (APKM) over APK")
+    parser.add_argument("--arch", help="Filter by architecture (arm64-v8a, armeabi-v7a, etc.)")
+    parser.add_argument("-v", "--version", help="Specific version to download")
+
+    args = parser.parse_args()
+
+    if not args.url and not args.search:
+        parser.print_help()
+        sys.exit(1)
+
+    try:
+        if args.search:
+            print(f"Searching for: {args.search}")
+            results = search_apps(args.search)
+
+            if not results:
+                print("No results found.")
+                sys.exit(1)
+
+            print("\nFound apps:")
+            for i, app in enumerate(results[:10], 1):
+                print(f"  {i}. {app['name']}")
+                print(f"     {app['link']}")
+
+            if len(results) > 0:
+                print(f"\nUse: apkmirror-dl \"{results[0]['link']}\" to download")
+            return
+
+        # Process URL
+        app_url = args.url
+        print(f"Fetching versions from: {app_url}")
+
+        versions = get_versions(app_url)
+
+        if not versions:
+            print("No versions found.")
+            sys.exit(1)
+
+        # Select version
+        selected_version = versions[0]
+        if args.version:
+            for v in versions:
+                if args.version in v.version:
+                    selected_version = v
+                    break
+            else:
+                print(f"Version '{args.version}' not found. Using latest: {selected_version.version}")
+        else:
+            print(f"Using latest version: {selected_version.version}")
+
+        # Get variants
+        print(f"Fetching variants...")
+        variants = get_variants(selected_version)
+
+        if not variants:
+            print("No variants found.")
+            sys.exit(1)
+
+        # Filter by bundle preference
+        if args.bundle:
+            variants = [v for v in variants if v.is_bundle] or variants
+        else:
+            non_bundle = [v for v in variants if not v.is_bundle]
+            if non_bundle:
+                variants = non_bundle
+
+        # Filter by architecture
+        if args.arch:
+            arch_variants = [v for v in variants if args.arch.lower() in v.architecture.lower()]
+            if arch_variants:
+                variants = arch_variants
+
+        # Select variant
+        selected_variant = variants[0]
+        print(f"Selected variant: {selected_variant.architecture}")
+        print(f"  Bundle: {selected_variant.is_bundle}")
+
+        # Determine output filename
+        if args.output:
+            output_path = args.output
+        else:
+            ext = "apkm" if selected_variant.is_bundle else "apk"
+            safe_version = selected_version.version.replace(" ", "_").replace("/", "_")
+            output_path = f"app_{safe_version}.{ext}"
+
+        # Download
+        download_apk(selected_variant, output_path)
+
+    except FailedToFetch as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    except FailedToFindElement as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    except KeyboardInterrupt:
+        print("\nAborted.", file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

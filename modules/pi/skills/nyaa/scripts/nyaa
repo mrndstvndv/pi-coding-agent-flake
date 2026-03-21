@@ -1,0 +1,208 @@
+#!/usr/bin/env bun
+
+import { fetchNyaaRSS, formatItemForDisplay } from "../src/rss.js";
+import { CATEGORY_NAMES } from "../src/types.js";
+
+interface Args {
+  query?: string;
+  category?: string;
+  filter?: string;
+  user?: string;
+  sort?: string;
+  limit?: number;
+  format: "table" | "magnets" | "json";
+  indices?: string;
+}
+
+function parseArgs(): Args {
+  const args = process.argv.slice(2);
+  const result: Args = { format: "table" };
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    switch (arg) {
+      case "-c":
+      case "--category":
+        result.category = args[++i];
+        break;
+      case "-f":
+      case "--filter":
+        result.filter = args[++i];
+        break;
+      case "-u":
+      case "--user":
+        result.user = args[++i];
+        break;
+      case "-s":
+      case "--sort":
+        result.sort = args[++i];
+        break;
+      case "-l":
+      case "--limit":
+        result.limit = parseInt(args[++i], 10);
+        break;
+      case "--format":
+        result.format = args[++i] as Args["format"];
+        break;
+      case "--indices":
+        result.indices = args[++i];
+        break;
+      case "-L":
+      case "--list-categories":
+        printCategories();
+        process.exit(0);
+        break;
+      case "-h":
+      case "--help":
+        printHelp();
+        process.exit(0);
+        break;
+      default:
+        if (!arg.startsWith("-") && !result.query) {
+          result.query = arg;
+        }
+        break;
+    }
+  }
+
+  return result;
+}
+
+function printHelp(): void {
+  console.log(`Usage: nyaa [options] [query]
+
+Search nyaa.si for anime torrents.
+
+Options:
+  -c, --category <code>    Category (default: 0_0)
+  -f, --filter <filter>    Filter: trusted, remakes, no-filter
+  -u, --user <username>    Filter by uploader
+  -s, --sort <sort>        Sort: seeders_desc, seeders_asc, date_desc, date_asc, size_desc, size_asc
+  -l, --limit <n>          Limit results shown (default: 10, max: 50)
+  --format <format>        Output format: table, magnets, json (default: table)
+  --indices <0,1,2|all>    Indices to output with --format magnets
+  -L, --list-categories    List all category codes
+  -h, --help               Show help
+
+Examples:
+  nyaa "frieren"                              # Search and show table
+  nyaa "frieren" -c 1_2 -s seeders_desc       # With category and sort
+  nyaa "frieren" --indices 0,1,2              # Get magnets for indices
+  nyaa "frieren" --format json > results.json # Save to file`);
+}
+
+function printCategories(): void {
+  console.log("Category codes:");
+  console.log("  0_0   All categories");
+  console.log("  1_0   Anime");
+  console.log("  1_1   Anime - Anime Music Video");
+  console.log("  1_2   Anime - English-translated");
+  console.log("  1_3   Anime - Non-English-translated");
+  console.log("  1_4   Anime - Raw");
+  console.log("  2_0   Audio");
+  console.log("  2_1   Audio - Lossless");
+  console.log("  2_2   Audio - Lossy");
+  console.log("  3_0   Literature");
+  console.log("  3_1   Literature - English-translated");
+  console.log("  3_2   Literature - Non-English-translated");
+  console.log("  3_3   Literature - Raw");
+  console.log("  4_0   Live Action");
+  console.log("  4_1   Live Action - English-translated");
+  console.log("  4_2   Live Action - Idol/Promotional Video");
+  console.log("  4_3   Live Action - Non-English-translated");
+  console.log("  4_4   Live Action - Raw");
+  console.log("  5_0   Pictures");
+  console.log("  5_1   Pictures - Graphics");
+  console.log("  5_2   Pictures - Photos");
+  console.log("  6_0   Software");
+  console.log("  6_1   Software - Applications");
+  console.log("  6_2   Software - Games");
+}
+
+async function main(): Promise<void> {
+  const args = parseArgs();
+
+  // Validate args
+  if (!args.query) {
+    console.error("Error: Query required");
+    printHelp();
+    process.exit(1);
+  }
+
+  if (args.indices && args.format === "table") {
+    args.format = "magnets";
+  }
+
+  if (args.format === "magnets" && !args.indices) {
+    console.error("Error: --format magnets requires --indices <0,1,2|all>");
+    process.exit(1);
+  }
+
+  // Fetch results
+  let items: any[];
+  try {
+    items = await fetchNyaaRSS(
+      args.query!,
+      args.category,
+      args.filter,
+      args.user,
+      args.sort as any
+    );
+  } catch (error) {
+    console.error("Error:", error instanceof Error ? error.message : error);
+    process.exit(1);
+  }
+
+  if (items.length === 0) {
+    console.log("No results found.");
+    return;
+  }
+
+  // Output based on format
+  switch (args.format) {
+    case "json":
+      console.log(JSON.stringify(items, null, 2));
+      break;
+
+    case "magnets":
+      let indices: number[];
+      if (args.indices === "all") {
+        indices = items.map((_, i) => i);
+      } else {
+        indices = args.indices!
+          .split(",")
+          .map((s) => parseInt(s.trim(), 10))
+          .filter((n) => !isNaN(n));
+      }
+
+      const selected = indices
+        .map((i) => items[i])
+        .filter((item): item is NonNullable<typeof item> => item !== undefined && item.magnet);
+
+      if (selected.length === 0) {
+        console.error("No valid items found for given indices");
+        process.exit(1);
+      }
+
+      selected.forEach((item) => console.log(item.magnet));
+      break;
+
+    case "table":
+    default:
+      const limit = Math.min(args.limit ?? 10, 50, items.length);
+      const categoryName = CATEGORY_NAMES[args.category ?? "0_0"] ?? "All";
+
+      console.log(`${items.length} result(s)${args.from ? ` [from ${args.from}]` : ` [${categoryName}]`}\n`);
+
+      for (let i = 0; i < limit; i++) {
+        console.log(formatItemForDisplay(items[i]!, i));
+      }
+
+      if (items.length > limit) {
+        console.log(`\n... and ${items.length - limit} more`);
+      }
+      break;
+  }
+}
+
+main();

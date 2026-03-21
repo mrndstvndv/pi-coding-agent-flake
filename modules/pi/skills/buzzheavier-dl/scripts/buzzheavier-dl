@@ -1,0 +1,104 @@
+#!/usr/bin/env -S uv run --script
+
+# /// script
+# requires-python = ">=3.9"
+# dependencies = ["cloudscraper"]
+# ///
+
+import argparse, subprocess, sys, re, os, hashlib
+import cloudscraper
+
+def get_file_info(url, scraper):
+    resp = scraper.get(url)
+    text = resp.text
+    
+    title = re.search(r'<span class="text-2xl">([^<]+)</span>', text)
+    filename = title.group(1).strip() if title else url.split("/")[-1]
+    
+    size = re.search(r'Size - ([^|]+)', text)
+    size = size.group(1).strip() if size else "unknown"
+    
+    sha1 = re.search(r'SHA-1.*?<code>([^<]+)</code>', text)
+    sha1 = sha1.group(1) if sha1 else None
+    
+    return {"filename": filename, "size": size, "sha1": sha1}
+
+def get_direct_url(buzz_url, scraper):
+    file_id = buzz_url.rstrip("/").split("/")[-1]
+    resp = scraper.get(f"{buzz_url}/download", headers={
+        "HX-Request": "true",
+        "HX-Current-URL": f"/{file_id}",
+        "Referer": buzz_url
+    })
+    if resp.status_code != 204:
+        raise Exception(f"Download failed: {resp.status_code}")
+    redirect = resp.headers.get("Hx-Redirect")
+    if not redirect:
+        raise Exception("No redirect URL")
+    return redirect
+
+def verify_sha1(path, expected):
+    h = hashlib.sha1()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            h.update(chunk)
+    return h.hexdigest().lower() == expected.lower()
+
+def download(url, output, sha1_hash=None):
+    cmd = ["aria2c", "-o", output, "-x", "16", "-s", "16", "-k", "10M", url]
+    print(f"Downloading to: {output}")
+    
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    
+    if proc.returncode != 0:
+        print(f"ERROR: aria2c failed (code {proc.returncode})", file=sys.stderr)
+        if proc.stdout:
+            print(f"STDOUT:\n{proc.stdout}", file=sys.stderr)
+        if proc.stderr:
+            print(f"STDERR:\n{proc.stderr}", file=sys.stderr)
+        raise Exception(f"aria2c exited with code {proc.returncode}")
+    
+    if proc.stderr:
+        print(f"Warnings:\n{proc.stderr}", file=sys.stderr)
+    
+    if sha1_hash and not verify_sha1(output, sha1_hash):
+        raise Exception(f"SHA-1 mismatch!")
+    
+    print("Done.")
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("url")
+    p.add_argument("-o", "--output", help="Output filename")
+    p.add_argument("--info", action="store_true", help="Show file info only")
+    p.add_argument("--extract-only", action="store_true", help="Show direct URL only")
+    p.add_argument("--hash", action="store_true", help="Show and verify hash after download")
+    args = p.parse_args()
+    
+    scraper = cloudscraper.create_scraper()
+    
+    info = get_file_info(args.url, scraper)
+    direct_url = get_direct_url(args.url, scraper)
+    
+    if args.info:
+        print(f"File: {info['filename']} | Size: {info['size']}")
+        if info['sha1']:
+            print(f"SHA-1: {info['sha1']}")
+        return
+    
+    if args.extract_only:
+        print(direct_url)
+        return
+    
+    print(f"File: {info['filename']} | Size: {info['size']}")
+    print(f"Direct: {direct_url}")
+    
+    if args.hash and not info['sha1']:
+        print("Warning: No SHA-1 available on page", file=sys.stderr)
+    
+    sha1_verify = info['sha1'] if args.hash else None
+    output = args.output or info["filename"]
+    download(direct_url, output, sha1_verify)
+
+if __name__ == "__main__":
+    main()

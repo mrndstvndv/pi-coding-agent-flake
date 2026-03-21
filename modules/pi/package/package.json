@@ -1,0 +1,28 @@
+{
+  "name": "nixdots-pi-extensions",
+  "version": "1.0.0",
+  "description": "Pi extensions for nixdots config",
+  "keywords": ["pi-package"],
+  "type": "module",
+  "dependencies": {
+    "@types/turndown": "^5.0.6",
+    "turndown": "^7.2.2",
+    "vscode-languageserver-protocol": "^3.17.5"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions/lsp/lsp.ts",
+      "./extensions/lsp/lsp-tool.ts",
+      "./extensions/kimi/kimi.ts",
+      "./extensions/pi-notify.ts",
+      "./extensions/file-command.ts",
+      "./extensions/handoff.ts",
+      "./extensions/web-fetch.ts",
+      "./extensions/web-search.ts",
+      "./extensions/opencode-free.ts",
+      "./extensions/kilocode-free.ts",
+      "./extensions/pi-rewind/index.ts",
+      "./extensions/edit.ts"
+    ]
+  }
+}
