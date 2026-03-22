@@ -1,220 +1,423 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import type { Component } from "@mariozechner/pi-tui";
-import type { Theme } from "@mariozechner/pi-coding-agent/dist/modes/interactive/theme/theme.js";
-import type { TUI } from "@mariozechner/pi-tui";
-import { visibleWidth, truncateToWidth } from "@mariozechner/pi-tui";
+import type { ExtensionAPI, Theme } from "@mariozechner/pi-coding-agent";
+import { SessionManager } from "@mariozechner/pi-coding-agent";
+import { Key, matchesKey, truncateToWidth, type Component, type TUI } from "@mariozechner/pi-tui";
+import { basename, parse } from "node:path";
 
-function middleTruncate(s: string, maxWidth: number, ellipsis = "…"): string {
-  const totalW = visibleWidth(s);
-  if (totalW <= maxWidth) return s;
+const WIDGET_KEY = "recent-sessions";
+const MAX_SESSIONS = 5;
 
-  const ellW = visibleWidth(ellipsis);
-  if (maxWidth <= ellW) return truncateToWidth(s, maxWidth, "");
+type SessionInfo = Awaited<ReturnType<typeof SessionManager.list>>[number];
 
-  const keep = maxWidth - ellW;
-  const leftW = Math.ceil(keep / 2);
-  const rightW = Math.floor(keep / 2);
+type WidgetPlacement = "aboveEditor" | "belowEditor";
 
-  const left = truncateToWidth(s, leftW, "");
-  const right = extractRightSuffix(s, rightW);
-
-  return left + ellipsis + right;
+interface WelcomeUi {
+	setWidget(
+		key: string,
+		content:
+			| string[]
+			| ((tui: TUI, theme: Theme) => Component & { dispose?(): void })
+			| undefined,
+		options?: { placement?: WidgetPlacement },
+	): void;
+	onTerminalInput(handler: (data: string) => { consume?: boolean; data?: string } | undefined): () => void;
+	getEditorText(): string;
+	setEditorText(text: string): void;
+	notify(message: string, type?: "info" | "warning" | "error"): void;
 }
 
-function extractRightSuffix(s: string, maxWidth: number): string {
-  if (maxWidth <= 0) return "";
-
-  const parts = s.split(/(\x1b\[[0-9;]*m)/).filter(Boolean);
-  let collected: string[] = [];
-  let widthUsed = 0;
-
-  for (let i = parts.length - 1; i >= 0; i--) {
-    const part = parts[i];
-    if (/^\x1b\[/.test(part)) {
-      collected.unshift(part);
-      continue;
-    }
-
-    const partW = visibleWidth(part);
-    if (partW <= maxWidth - widthUsed) {
-      collected.unshift(part);
-      widthUsed += partW;
-    } else {
-      const need = maxWidth - widthUsed;
-      if (need > 0) {
-        const suffix = sliceRightPlain(part, need);
-        if (suffix) collected.unshift(suffix);
-      }
-      break;
-    }
-  }
-
-  return collected.join("");
+interface WelcomeSessionManager {
+	getEntries(): { type: string }[];
+	getSessionDir(): string;
 }
 
-function sliceRightPlain(s: string, cols: number): string {
-  const chars = [...s];
-  let acc = "";
-  let accW = 0;
-
-  for (let i = chars.length - 1; i >= 0; i--) {
-    const ch = chars[i];
-    const w = visibleWidth(ch);
-    if (accW + w > cols) break;
-    acc = ch + acc;
-    accW += w;
-  }
-
-  return acc;
+interface WelcomeContext {
+	hasUI: boolean;
+	cwd: string;
+	sessionManager: WelcomeSessionManager;
+	ui: WelcomeUi;
 }
 
-function formatPath(path: string, maxWidth: number): string {
-  if (visibleWidth(path) <= maxWidth) return path;
+let welcomeWidget: RecentSessionsWidget | undefined;
+let terminalInputUnsubscribe: (() => void) | undefined;
+let recentSessions: SessionInfo[] = [];
+let recentSessionsLoaded = false;
+let sessionPickerEnabled = false;
+let openedSessionSequence = 0;
+const openedSessions = new Map<string, number>();
 
-  const lastSlash = path.lastIndexOf("/");
-  if (lastSlash === -1) return middleTruncate(path, maxWidth);
+function formatRelativeTime(date: Date): string {
+	const diffMs = Date.now() - date.getTime();
+	if (diffMs < 60_000) return "now";
 
-  const dirname = path.slice(0, lastSlash + 1);
-  const basename = path.slice(lastSlash + 1);
-  const basenameW = visibleWidth(basename);
+	const minutes = Math.floor(diffMs / 60_000);
+	if (minutes < 60) return `${minutes}m ago`;
 
-  if (basenameW >= maxWidth - 3) {
-    return "…" + truncateToWidth(basename, maxWidth - 1, "");
-  }
+	const hours = Math.floor(minutes / 60);
+	if (hours < 24) return `${hours}h ago`;
 
-  const dirBudget = maxWidth - basenameW;
-  const truncatedDir = middleTruncate(dirname, dirBudget, "…");
-  return truncatedDir + basename;
+	const days = Math.floor(hours / 24);
+	if (days < 7) return `${days}d ago`;
+
+	const weeks = Math.floor(days / 7);
+	if (weeks < 5) return `${weeks}w ago`;
+
+	const months = Math.floor(days / 30);
+	if (months < 12) return `${months}mo ago`;
+
+	return `${Math.floor(days / 365)}y ago`;
 }
 
-export default function (pi: ExtensionAPI) {
-  pi.on("session_start", async (_event, ctx) => {
-    // Set up custom header that shows truncated version on resize
-    ctx.ui.setHeader((tui: TUI, theme: Theme) =>
-      new WelcomeHeaderComponent(theme)
-    );
-
-    // Set up a widget that hides when there are messages
-    ctx.ui.setWidget(
-      "welcome-info",
-      (_tui, theme) => new ConditionalWelcomeWidget(theme, ctx),
-      { placement: "aboveEditor" }
-    );
-  });
+function normalizeText(text: string | undefined): string {
+	const value = text?.trim();
+	if (!value) return "Untitled session";
+	return value.replace(/\s+/g, " ");
 }
 
-/**
- * Header component for resize handling - shows truncated context info
- */
-class WelcomeHeaderComponent implements Component {
-  private theme: Theme;
-  private cachedWidth?: number;
-  private cachedLines?: string[];
+function shortCwd(cwd: string): string {
+	const name = basename(cwd);
+	if (name) return name;
 
-  constructor(theme: Theme) {
-    this.theme = theme;
-  }
+	const root = parse(cwd).root;
+	if (root) return root;
 
-  render(width: number): string[] {
-    if (this.cachedLines && this.cachedWidth === width) {
-      return this.cachedLines;
-    }
-
-    const lines: string[] = [];
-    const context = getContextInfo();
-
-    if (context.contextFiles.length > 0) {
-      lines.push(this.theme.fg("muted", "[Context]"));
-      for (const file of context.contextFiles) {
-        lines.push(middleTruncate("  " + formatPath(file, width - 2), width));
-      }
-      lines.push("");
-    }
-
-    if (context.skills.length > 0) {
-      lines.push(this.theme.fg("muted", "[Skills]"));
-      lines.push("  user");
-      for (const skill of context.skills) {
-        lines.push(middleTruncate("    " + formatPath(skill.path, width - 4), width));
-      }
-      lines.push("");
-    }
-
-    if (context.extensions.length > 0) {
-      lines.push(this.theme.fg("muted", "[Extensions]"));
-      lines.push("  user");
-      for (const ext of context.extensions) {
-        lines.push(middleTruncate("    " + formatPath(ext.path, width - 4), width));
-      }
-      lines.push("");
-    }
-
-    this.cachedWidth = width;
-    this.cachedLines = lines;
-    return lines;
-  }
-
-  invalidate(): void {
-    this.cachedWidth = undefined;
-    this.cachedLines = undefined;
-  }
+	return ".";
 }
 
-/**
- * Widget that shows welcome info only when there are no messages yet
- */
-class ConditionalWelcomeWidget implements Component {
-  private theme: Theme;
-  private ctx: { sessionManager: { getEntries?: () => unknown[] } };
+function buildSessionPreview(session: SessionInfo): string {
+	const prompt = normalizeText(session.firstMessage);
+	if (session.name) {
+		return `${normalizeText(session.name)} — ${prompt}`;
+	}
 
-  constructor(theme: Theme, ctx: { sessionManager: { getEntries?: () => unknown[] } }) {
-    this.theme = theme;
-    this.ctx = ctx;
-  }
-
-  render(width: number): string[] {
-    // Hide when there are messages in the conversation
-    const entries = this.ctx.sessionManager.getEntries?.() || [];
-    if (entries.length > 0) {
-      return []; // Return empty to hide
-    }
-
-    // Show welcome message (context is already shown in header)
-    const welcomeText = "Welcome to pi — your coding assistant. Let's build something great together.";
-    return [
-      this.theme.fg("accent", middleTruncate(welcomeText, width)),
-      "" // spacer
-    ];
-  }
-
-  invalidate(): void {
-    // No cache
-  }
+	return prompt;
 }
 
-function getContextInfo() {
-  return {
-    contextFiles: [
-      joinHome(".pi/agent/AGENTS.md"),
-      "/private/etc/nix-darwin/AGENTS.md"
-    ],
-    skills: [
-      { scope: "user" as const, path: joinHome(".pi/agent/skills/find-skills/SKILL.md") },
-      { scope: "user" as const, path: joinHome(".pi/agent/skills/morphe-patcher/SKILL.md") }
-    ],
-    extensions: [
-      { scope: "user" as const, path: "/nix/store/jayscj29apwb7b0syl7hwn2b43ki2k30-nixdots-pi-extensions-1.0.0/extensions/file-command.ts" },
-      { scope: "user" as const, path: "/nix/store/jayscj29apwb7b0syl7hwn2b43ki2k30-nixdots-pi-extensions-1.0.0/extensions/handoff.ts" },
-      { scope: "user" as const, path: "/nix/store/jayscj29apwb7b0syl7hwn2b43ki2k30-nixdots-pi-extensions-1.0.0/extensions/kimi/kimi.ts" },
-      { scope: "user" as const, path: "/nix/store/jayscj29apwb7b0syl7hwn2b43ki2k30-nixdots-pi-extensions-1.0.0/extensions/lsp/lsp-tool.ts" },
-      { scope: "user" as const, path: "/nix/store/jayscj29apwb7b0syl7hwn2b43ki2k30-nixdots-pi-extensions-1.0.0/extensions/lsp/lsp.ts" },
-      { scope: "user" as const, path: "/nix/store/jayscj29apwb7b0syl7hwn2b43ki2k30-nixdots-pi-extensions-1.0.0/extensions/pi-notify.ts" },
-      { scope: "user" as const, path: joinHome(".pi/agent/extensions/welcome.ts") }
-    ]
-  };
+function markSessionOpened(sessionPath: string | undefined): void {
+	if (!sessionPath) return;
+
+	openedSessions.set(sessionPath, ++openedSessionSequence);
 }
 
-function joinHome(path: string): string {
-  const home = process.env.HOME || "~";
-  return path.replace(/^~/, home);
+function sortSessionsByMostRecentlyOpened(sessions: SessionInfo[]): SessionInfo[] {
+	return sessions.sort((a, b) => {
+		const openedDifference = (openedSessions.get(b.path) ?? 0) - (openedSessions.get(a.path) ?? 0);
+		if (openedDifference !== 0) return openedDifference;
+
+		return b.modified.getTime() - a.modified.getTime();
+	});
+}
+
+class RecentSessionsWidget implements Component {
+	private loading = true;
+	private error: string | null = null;
+	private sessions: SessionInfo[] = [];
+	private selectedIndex = 0;
+	private pickerEnabled = false;
+	private disposed = false;
+	private cachedWidth: number | undefined;
+	private cachedLines: string[] | undefined;
+
+	constructor(
+		private readonly tui: TUI,
+		private readonly theme: Theme,
+		private readonly cwd: string,
+		private readonly sessionDir: string,
+	) {
+		void this.load();
+	}
+
+	setPickerEnabled(enabled: boolean): void {
+		if (this.pickerEnabled === enabled) return;
+		this.pickerEnabled = enabled;
+		if (!enabled) {
+			this.selectedIndex = 0;
+		}
+		this.invalidate();
+		this.tui.requestRender();
+	}
+
+	private async load(): Promise<void> {
+		try {
+			const sessions = await SessionManager.list(this.cwd, this.sessionDir);
+			if (this.disposed) return;
+
+			this.sessions = sortSessionsByMostRecentlyOpened(
+				sessions.filter((session) => session.cwd === this.cwd && session.messageCount > 0),
+			).slice(0, MAX_SESSIONS);
+			this.error = null;
+			this.selectedIndex = Math.min(this.selectedIndex, Math.max(0, this.sessions.length - 1));
+		} catch (error) {
+			if (this.disposed) return;
+			this.error = error instanceof Error ? error.message : String(error);
+		} finally {
+			if (this.disposed) return;
+			this.loading = false;
+			this.invalidate();
+			this.tui.requestRender();
+		}
+	}
+
+	get selectedSession(): SessionInfo | undefined {
+		return this.sessions[this.selectedIndex];
+	}
+
+	moveSelection(delta: number): void {
+		if (!this.pickerEnabled) return;
+		if (this.sessions.length === 0) return;
+
+		const next = this.selectedIndex + delta;
+		this.selectedIndex = Math.max(0, Math.min(this.sessions.length - 1, next));
+		this.invalidate();
+		this.tui.requestRender();
+	}
+
+	render(width: number): string[] {
+		if (this.cachedWidth === width && this.cachedLines) {
+			return this.cachedLines;
+		}
+
+		const lines: string[] = [];
+		const push = (text: string) => lines.push(truncateToWidth(text, width));
+		const dim = (text: string) => this.theme.fg("dim", text);
+		const muted = (text: string) => this.theme.fg("muted", text);
+		const accent = (text: string) => this.theme.fg("accent", text);
+		const text = (value: string) => this.theme.fg("text", value);
+
+		push(accent(this.theme.bold("Recent sessions")));
+		lines.push("");
+
+		if (this.loading) {
+			push(muted("Loading sessions…"));
+			push(dim("Enter opens the selected session."));
+			return this.cache(width, lines);
+		}
+
+		if (this.error) {
+			push(this.theme.fg("warning", `Could not load sessions: ${this.error}`));
+			return this.cache(width, lines);
+		}
+
+		if (this.sessions.length === 0) {
+			push(muted("No recent sessions in this folder"));
+			push(dim("Typing keeps the prompt as the only active input."));
+			return this.cache(width, lines);
+		}
+
+		for (const [index, session] of this.sessions.entries()) {
+			const isSelected = this.pickerEnabled && index === this.selectedIndex;
+			const prefix = isSelected ? accent("> ") : dim("  ");
+			const preview = buildSessionPreview(session);
+			const row = `${prefix}${isSelected ? accent(preview) : text(preview)}${dim(` · ${formatRelativeTime(session.modified)}`)}`;
+			push(row);
+		}
+
+		lines.push("");
+		if (this.pickerEnabled) {
+			push(dim("↑↓ choose · Enter open · Esc close"));
+		} else {
+			push(dim("Typing keeps the list closed."));
+		}
+
+		return this.cache(width, lines);
+	}
+
+	private cache(width: number, lines: string[]): string[] {
+		this.cachedWidth = width;
+		this.cachedLines = lines;
+		return lines;
+	}
+
+	invalidate(): void {
+		this.cachedWidth = undefined;
+		this.cachedLines = undefined;
+	}
+
+	dispose(): void {
+		this.disposed = true;
+	}
+}
+
+async function loadRecentSessions(ctx: Pick<WelcomeContext, "cwd" | "sessionManager">): Promise<void> {
+	recentSessionsLoaded = false;
+	try {
+		const sessions = await SessionManager.list(ctx.cwd, ctx.sessionManager.getSessionDir());
+		recentSessions = sortSessionsByMostRecentlyOpened(
+				sessions.filter((session) => session.cwd === ctx.cwd && session.messageCount > 0),
+			).slice(0, MAX_SESSIONS);
+	} catch {
+		recentSessions = [];
+	} finally {
+		recentSessionsLoaded = true;
+	}
+}
+
+function closeWelcomeWidget(ctx: WelcomeContext): void {
+	sessionPickerEnabled = false;
+	welcomeWidget?.dispose();
+	welcomeWidget = undefined;
+	ctx.ui.setWidget(WIDGET_KEY, undefined, { placement: "belowEditor" });
+}
+
+function syncWelcomeWidget(ctx: WelcomeContext): void {
+	if (!ctx.hasUI) return;
+
+	if (ctx.ui.getEditorText().trim().length > 0) {
+		closeWelcomeWidget(ctx);
+		return;
+	}
+
+	if (recentSessions.length === 0) {
+		closeWelcomeWidget(ctx);
+		return;
+	}
+
+	sessionPickerEnabled = true;
+
+	ctx.ui.setWidget(
+		WIDGET_KEY,
+		(tui, theme) => {
+			welcomeWidget?.dispose();
+			welcomeWidget = new RecentSessionsWidget(tui, theme, ctx.cwd, ctx.sessionManager.getSessionDir());
+			welcomeWidget.setPickerEnabled(sessionPickerEnabled);
+			return welcomeWidget;
+		},
+		{ placement: "belowEditor" },
+	);
+}
+
+function installTerminalInputBridge(ctx: WelcomeContext): void {
+	if (!ctx.hasUI) return;
+
+	terminalInputUnsubscribe?.();
+	terminalInputUnsubscribe = ctx.ui.onTerminalInput((data) => {
+		if (recentSessions.length === 0) return;
+
+		const editorHasText = ctx.ui.getEditorText().trim().length > 0;
+		if (editorHasText) {
+			if (sessionPickerEnabled || welcomeWidget) {
+				closeWelcomeWidget(ctx);
+			}
+			return;
+		}
+
+		if (matchesKey(data, Key.tab)) {
+			if (!welcomeWidget) {
+				sessionPickerEnabled = true;
+				syncWelcomeWidget(ctx);
+				welcomeWidget?.setPickerEnabled(true);
+				return { consume: true };
+			}
+
+			sessionPickerEnabled = true;
+			welcomeWidget.setPickerEnabled(true);
+			return { consume: true };
+		}
+
+		const widget = welcomeWidget;
+		if (!widget) return;
+
+		if (!sessionPickerEnabled) {
+			if (!matchesKey(data, Key.up) && !matchesKey(data, Key.down) && !matchesKey(data, Key.escape) && !matchesKey(data, Key.enter)) {
+				closeWelcomeWidget(ctx);
+			}
+			return;
+		}
+
+		if (matchesKey(data, Key.up)) {
+			widget.moveSelection(-1);
+			return { consume: true };
+		}
+
+		if (matchesKey(data, Key.down)) {
+			widget.moveSelection(1);
+			return { consume: true };
+		}
+
+		if (matchesKey(data, Key.escape)) {
+			closeWelcomeWidget(ctx);
+			ctx.ui.notify("Session picker closed", "info");
+			return { consume: true };
+		}
+
+		if (matchesKey(data, Key.enter)) {
+			if (!recentSessionsLoaded) {
+				ctx.ui.notify("Recent sessions are still loading", "warning");
+				return { consume: true };
+			}
+
+			const selected = widget.selectedSession;
+			if (!selected) return { consume: true };
+
+			const index = recentSessions.findIndex((session) => session.path === selected.path);
+			if (index === -1) return { consume: true };
+
+			ctx.ui.setEditorText(`/recent ${index + 1}`);
+			return { data };
+		}
+
+		closeWelcomeWidget(ctx);
+	});
+}
+
+function resetWelcomeState(ctx: WelcomeContext): void {
+	terminalInputUnsubscribe?.();
+	terminalInputUnsubscribe = undefined;
+	closeWelcomeWidget(ctx);
+}
+
+export default function welcomeExtension(pi: ExtensionAPI): void {
+	pi.registerCommand("recent", {
+		description: "Open a recent session by number (1-5)",
+		handler: async (args, ctx) => {
+			const value = args.trim();
+			const index = Number.parseInt(value, 10);
+
+			if (!recentSessionsLoaded) {
+				ctx.ui.notify("Recent sessions are still loading", "warning");
+				return;
+			}
+
+			if (!Number.isInteger(index) || index < 1) {
+				ctx.ui.notify(`Usage: /recent <1-${Math.max(1, recentSessions.length)}>`, "warning");
+				return;
+			}
+
+			const session = recentSessions[index - 1];
+			if (!session) {
+				ctx.ui.notify(`No recent session at position ${index}`, "warning");
+				return;
+			}
+
+			const result = await ctx.switchSession(session.path);
+			if (result.cancelled) {
+				return;
+			}
+
+			ctx.ui.setEditorText("");
+		},
+	});
+
+	pi.on("session_start", async (_event, ctx) => {
+		if (!ctx.hasUI) return;
+
+		markSessionOpened((ctx.sessionManager as { getSessionFile?: () => string | undefined }).getSessionFile?.());
+		await loadRecentSessions(ctx);
+		syncWelcomeWidget(ctx);
+		installTerminalInputBridge(ctx);
+	});
+
+	pi.on("session_switch", async (_event, ctx) => {
+		if (!ctx.hasUI) return;
+
+		markSessionOpened((ctx.sessionManager as { getSessionFile?: () => string | undefined }).getSessionFile?.());
+		await loadRecentSessions(ctx);
+		closeWelcomeWidget(ctx);
+		installTerminalInputBridge(ctx);
+	});
+
+	pi.on("agent_start", (_event, ctx) => {
+		if (!ctx.hasUI) return;
+
+		resetWelcomeState(ctx);
+	});
 }

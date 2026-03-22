@@ -38,7 +38,6 @@ let
       packages = [ "${piExtensions}" "../personal" ];
       theme = "terminal";
       themes = [ "~/.pi/agent/themes" ];
-      hideThinkingBlock = true;
     };
 in
 {

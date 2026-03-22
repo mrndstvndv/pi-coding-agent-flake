@@ -8,5 +8,5 @@
   "defaultProvider": "opencode",
   "defaultModel": "mimo-v2-pro-free",
   "defaultThinkingLevel": "xhigh",
-  "hideThinkingBlock": false
+  "quietStartup": true
 }
