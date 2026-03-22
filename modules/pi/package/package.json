@@ -22,7 +22,8 @@
       "./extensions/opencode-free.ts",
       "./extensions/kilocode-free.ts",
       "./extensions/pi-rewind/index.ts",
-      "./extensions/edit.ts"
+      "./extensions/edit.ts",
+      "./extensions/mdview.ts"
     ]
   }
 }
