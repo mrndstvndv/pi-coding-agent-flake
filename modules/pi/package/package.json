@@ -24,7 +24,8 @@
       "./extensions/pi-rewind/index.ts",
       "./extensions/edit.ts",
       "./extensions/mdview.ts",
-      "./extensions/welcome.ts"
+      "./extensions/welcome.ts",
+      "./extensions/title-generator.ts"
     ]
   }
 }
