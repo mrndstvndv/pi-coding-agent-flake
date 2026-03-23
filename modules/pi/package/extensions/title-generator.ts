@@ -290,25 +290,31 @@ export default function (pi: ExtensionAPI) {
     if (hasUserMessages) titled = true;
   });
 
-  pi.on("agent_end", async (_event, ctx) => {
+  pi.on("agent_end", (_event, ctx) => {
     if (titled || titling) return;
     titling = true;
 
-    try {
-      const entries = ctx.sessionManager.getBranch();
-      const conversationText = gatherFirstMessages(entries);
-      if (!conversationText.trim()) return;
-
-      const title = await generateTitlePlain(conversationText, ctx.cwd);
-      if (title) {
-        pi.setSessionName(title);
-        titled = true;
-      }
-    } catch (err) {
-      console.error("[title-generator]", err);
-    } finally {
+    const entries = ctx.sessionManager.getBranch();
+    const conversationText = gatherFirstMessages(entries);
+    if (!conversationText.trim()) {
       titling = false;
+      return;
     }
+
+    // Fire-and-forget: generate title in background without blocking next prompt
+    generateTitlePlain(conversationText, ctx.cwd)
+      .then((title) => {
+        if (title) {
+          pi.setSessionName(title);
+          titled = true;
+        }
+      })
+      .catch((err) => {
+        console.error("[title-generator]", err);
+      })
+      .finally(() => {
+        titling = false;
+      });
   });
 
   // /title command — regenerate with full conversation + BorderedLoader UI
