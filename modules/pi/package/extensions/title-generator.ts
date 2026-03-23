@@ -302,7 +302,7 @@ export default function (pi: ExtensionAPI) {
     }
 
     // Fire-and-forget: generate title in background without blocking next prompt
-    generateTitlePlain(conversationText, ctx.cwd)
+    void generateTitlePlain(conversationText, ctx.cwd)
       .then((title) => {
         if (title) {
           pi.setSessionName(title);
@@ -311,6 +311,9 @@ export default function (pi: ExtensionAPI) {
       })
       .catch((err) => {
         console.error("[title-generator]", err);
+        try {
+          ctx.ui?.notify?.(`Title generation failed: ${formatError(err)}`, "error");
+        } catch {}
       })
       .finally(() => {
         titling = false;
