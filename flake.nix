@@ -59,6 +59,7 @@
       homeManagerModules.default = import ./modules/pi/default.nix;
 
       packages = forAllSystems (system: {
+        default = mkPi system;
         pi = mkPi system;
       });
     };
