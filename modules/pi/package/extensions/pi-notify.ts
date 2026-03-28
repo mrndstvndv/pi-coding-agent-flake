@@ -32,10 +32,6 @@ function buildTmuxPassthrough(payload: string): string {
   return `\x1bPtmux;\x1b\x1b]${payload}\x07\x1b\\`;
 }
 
-function sendOsc9(ttyPath: string, message: string): boolean {
-  return writeToTty(ttyPath, buildOsc(`9;${message}`));
-}
-
 function sendOsc777(ttyPath: string, title: string, message: string): boolean {
   return writeToTty(ttyPath, buildOsc(`777;notify;${title};${message}`));
 }
@@ -93,8 +89,8 @@ export default function (pi: ExtensionAPI) {
     const safeTitle = sanitizeOscValue(NOTIFY_TITLE);
 
     if (!inTmux) {
-      const sent = sendOsc9("/dev/tty", safeMessage);
-      if (!sent) process.stdout.write(buildOsc(`9;${safeMessage}`));
+      const sent = sendOsc777("/dev/tty", safeTitle, safeMessage);
+      if (!sent) process.stdout.write(buildOsc(`777;notify;${safeTitle};${safeMessage}`));
       return;
     }
 
@@ -108,14 +104,12 @@ export default function (pi: ExtensionAPI) {
     let sent = false;
 
     for (const tty of clientTtys) {
-      sent = sendOsc9(tty, safeMessage) || sent;
       sent = sendOsc777(tty, safeTitle, safeMessage) || sent;
     }
 
     if (sent) return;
 
     // Fallback when client tty discovery/write fails.
-    process.stdout.write(buildTmuxPassthrough(`9;${safeMessage}`));
     process.stdout.write(buildTmuxPassthrough(`777;notify;${safeTitle};${safeMessage}`));
   });
 }
