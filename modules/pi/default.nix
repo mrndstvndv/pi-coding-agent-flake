@@ -21,21 +21,26 @@ let
     else if piPackageNamed != null then piPackageNamed
     else throw "piAgent flake must expose packages.${pkgs.system}.default or packages.${pkgs.system}.pi";
 
-  # Generate settings.json with the nix store path baked in
-  piSettings = builtins.fromJSON (builtins.readFile ./settings.json);
-
   piVersion =
     if piPackage == null then null
     else if piPackage ? version then piPackage.version
     else if lib.hasAttrByPath [ "lib" "version" ] piAgent then piAgent.lib.version
     else throw "piAgent flake must expose a pi package version via packages.${pkgs.system}.*.version or lib.version";
-  piSettingsFinal = piSettings
-    // lib.optionalAttrs (piVersion != null) {
-      lastChangelogVersion = piVersion;
+  piSettingsFinal =
+    {
+      lsp.hookMode = "edit_write";
+      defaultProvider = "opencode";
+      defaultModel = "mimo-v2-pro-free";
+      defaultThinkingLevel = "xhigh";
+      quietStartup = true;
     }
+    // lib.optionalAttrs (piVersion != null) { lastChangelogVersion = piVersion; }
     // {
-      # Reference the package directly in the nix store (fully deterministic)
-      packages = [ "${piExtensions}" "../personal" ];
+      packages =
+        [ "${piExtensions}" "../personal" ]
+        ++ [
+          { source = "git:github.com/tmustier/pi-extensions"; extensions = [ "files-widget/index.ts" ]; }
+        ];
       theme = "terminal";
       themes = [ "~/.pi/agent/themes" ];
     };

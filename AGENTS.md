@@ -8,8 +8,7 @@ Nix flake packaging [pi](https://github.com/badlogic/pi-mono) coding agent with 
 .
 ├── flake.nix                          # Flake entry: builds pi binary + HM module
 ├── modules/pi/
-│   ├── default.nix                    # Home Manager module (settings, symlinks, extension build)
-│   ├── settings.json                  # Base pi settings (merged with generated values by default.nix)
+│   ├── default.nix                    # Home Manager module (all settings + symlinks, extension build)
 │   ├── models.json                    # Custom provider/model definitions → symlinked to ~/.pi/agent/models.json
 │   ├── AGENTS.md                      # Global agent instructions → symlinked to ~/.pi/agent/AGENTS.md
 │   ├── package/                       # NPM package: custom extensions
@@ -36,7 +35,7 @@ Nix flake packaging [pi](https://github.com/badlogic/pi-mono) coding agent with 
 
 | Want to change | Edit |
 |---|---|
-| Pi settings (provider, model, thinking level) | `modules/pi/settings.json` |
+| Pi settings (provider, model, thinking level, packages) | `modules/pi/default.nix` |
 | Custom models/providers | `modules/pi/models.json` |
 | Extension code | `modules/pi/package/extensions/*.ts` |
 | Extension dependencies | `modules/pi/package/package.json` + lockfile |
@@ -50,22 +49,21 @@ Nix flake packaging [pi](https://github.com/badlogic/pi-mono) coding agent with 
 
 ## Architecture
 
-- `default.nix` owns the live `~/.pi/agent/settings.json` file.
-- `settings.json` is the base config; `default.nix` merges in generated values.
+- `default.nix` defines all pi settings inline as Nix attrsets and generates `~/.pi/agent/settings.json` from a single source.
 - The module builds `package/` with `pkgs.buildNpmPackage`.
 - `npmDepsHash` must be updated whenever `package/package-lock.json` changes.
 - If the `piAgent` flake input exists, the module installs the `pi` binary from that flake and derives `lastChangelogVersion` from the package version.
 - The generated settings inject:
   - the built extension package path
   - the local `../personal` package path, which resolves to `~/.pi/personal`
+  - external extension packages (e.g. `git:github.com/tmustier/pi-extensions`)
   - the active theme (`terminal`)
   - `themes = [ "~/.pi/agent/themes" ]`
-  - `hideThinkingBlock = true`
 
 ## Key rules
 
 - **Never hand-edit `~/.pi/agent/`** — Home Manager overwrites it on rebuild. Edit `modules/pi/` only.
-- `settings.json` is the base config. `default.nix` merges in: package paths, theme, `lastChangelogVersion`, etc.
+- All settings live in `default.nix`.
 - Extensions build via `pkgs.buildNpmPackage`. Update `npmDepsHash` in `default.nix` after changing `package-lock.json`.
 - Skills auto-discovered from `SKILL.md` files. Scripts go in `skills/<name>/scripts/` and get symlinked to `~/.pi/agent/bin/`.
 - Prompt templates expand with `/<name>`. Keep them short, markdown format.
