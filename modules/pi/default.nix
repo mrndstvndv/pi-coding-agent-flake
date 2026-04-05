@@ -30,7 +30,7 @@ let
     {
       lsp.hookMode = "edit_write";
       defaultProvider = "opencode";
-      defaultModel = "mimo-v2-pro-free";
+      defaultModel = "qwen3.6-plus-free";
       defaultThinkingLevel = "xhigh";
       quietStartup = true;
     }
