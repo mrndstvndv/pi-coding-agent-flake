@@ -37,10 +37,7 @@ let
     // lib.optionalAttrs (piVersion != null) { lastChangelogVersion = piVersion; }
     // {
       packages =
-        [ "${piExtensions}" "../personal" ]
-        ++ [
-          { source = "git:github.com/tmustier/pi-extensions"; extensions = [ "files-widget/index.ts" ]; }
-        ];
+        [ "${piExtensions}" "../personal" ];
       theme = "terminal";
       themes = [ "~/.pi/agent/themes" ];
     };

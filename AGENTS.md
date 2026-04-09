@@ -105,6 +105,27 @@ Adding npm deps to extensions:
 3. Update `npmDepsHash` in `modules/pi/default.nix`
 4. Rebuild
 
+### Adding external extension packages
+
+Pi can load extensions from external Git repositories:
+
+```nix
+packages = [
+  "${piExtensions}" 
+  "../personal"
+] ++ lib.optionals (builtins.pathExists /path/to/repo) [
+  { source = "git:github.com/user/pi-extensions"; }
+  { source = "git:github.com/user/pi-extensions"; extensions = [ "specific/ext.ts" ]; }
+  { source = "git:github.com/user/pi-extensions"; skills = [ "my-skill" ]; }
+];
+```
+
+Options:
+- `source` — Git URL (prefixed with `git:`)
+- `extensions` — load only specific extension files (array)
+- `skills` — load only specific skills (array)
+- No filters — loads all extensions/skills from the repo
+
 Extension notes:
 - Resources are registered in `package/package.json` under the `pi` key.
 - Local extension entrypoints should stay relative to the package root, e.g. `./extensions/web-fetch.ts`.
