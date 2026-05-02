@@ -389,6 +389,226 @@ cmd_raw() {
     cmd_get "$cmd" | pretty_json
 }
 
+goform_post() {
+    local data="$1"
+
+    curl -s -k -c "$COOKIE_FILE" -b "$COOKIE_FILE" \
+        -X POST "${BASE_URL}/goform/goform_set_cmd_process" \
+        -H "Content-Type: application/x-www-form-urlencoded" \
+        -d "isTest=false&${data}"
+}
+
+band_lock_report() {
+    local current_info="$1"
+    local once_data="$2"
+
+    python3 - "$current_info" "$once_data" <<'PY'
+import json
+import math
+import sys
+
+
+def js_substring(value, start, end=None):
+    length = len(value)
+    start = max(0, start)
+    end = length if end is None else max(0, end)
+    if start > end:
+        start, end = end, start
+    return value[start:end]
+
+
+def build_band_list(selected_bands, supported_bands):
+    if not supported_bands:
+        return "", 0
+
+    bit_length = math.ceil(max(supported_bands) / 8) * 8
+    bits = ["0"] * bit_length
+    for band in selected_bands:
+        bits[bit_length - band] = "1"
+
+    byte_values = [
+        str(int("".join(bits[index:index + 8]), 2))
+        for index in range(0, bit_length, 8)
+    ]
+    band_list = ",".join(reversed(byte_values))
+
+    lower = js_substring("".join(bits), len(bits) - 25)
+    upper = js_substring("".join(bits), len(bits) - 43, len(bits) - 32)
+
+    if "1" not in lower:
+        zeact = 0
+    elif "1" not in upper:
+        zeact = 1
+    else:
+        zeact = 2
+
+    return band_list, zeact
+
+
+current_info = json.loads(sys.argv[1])
+once_data = json.loads(sys.argv[2])
+
+supported_bands = sorted(
+    int(key[4:])
+    for key in current_info
+    if key.startswith("band") and key[4:].isdigit()
+)
+selected_bands = [
+    band for band in supported_bands
+    if str(current_info.get(f"band{band}", "")) == "1"
+]
+band_list, zeact = build_band_list(selected_bands, supported_bands)
+
+summary = {
+    "band_state": current_info.get("band_state", ""),
+    "supported_bands": supported_bands,
+    "selected_bands": selected_bands,
+    "band_list": band_list,
+    "wcdma_list": once_data.get("tz_lock_wcdma_band") or "0,0,0",
+    "tds_list": once_data.get("tz_lock_tds_band") or "0,0",
+    "zeact": zeact,
+}
+print(json.dumps(summary))
+PY
+}
+
+band_lock_payload() {
+    local band_state="$1"
+    local selection_mode="$2"
+    local current_info="$3"
+    local once_data="$4"
+    shift 4
+
+    python3 - "$band_state" "$selection_mode" "$current_info" "$once_data" "$@" <<'PY'
+import json
+import math
+import re
+import sys
+
+
+def js_substring(value, start, end=None):
+    length = len(value)
+    start = max(0, start)
+    end = length if end is None else max(0, end)
+    if start > end:
+        start, end = end, start
+    return value[start:end]
+
+
+band_state = sys.argv[1]
+selection_mode = sys.argv[2]
+current_info = json.loads(sys.argv[3])
+once_data = json.loads(sys.argv[4])
+raw_args = sys.argv[5:]
+
+supported_bands = sorted(
+    int(key[4:])
+    for key in current_info
+    if key.startswith("band") and key[4:].isdigit()
+)
+if not supported_bands:
+    raise SystemExit("No LTE bands reported by router")
+
+if selection_mode == "current":
+    selected_bands = [
+        band for band in supported_bands
+        if str(current_info.get(f"band{band}", "")) == "1"
+    ]
+else:
+    tokens = []
+    for raw_value in raw_args:
+        tokens.extend(
+            token for token in re.split(r"[,\s]+", raw_value) if token
+        )
+
+    if not tokens:
+        raise SystemExit("No LTE bands specified")
+
+    selected_bands = []
+    for token in tokens:
+        if token.lower() == "all":
+            selected_bands = supported_bands[:]
+            break
+        if not token.isdigit():
+            raise SystemExit(f"Invalid band: {token}")
+        band = int(token)
+        if band not in supported_bands:
+            raise SystemExit(f"Unsupported band: {band}")
+        if band not in selected_bands:
+            selected_bands.append(band)
+
+bit_length = math.ceil(max(supported_bands) / 8) * 8
+bits = ["0"] * bit_length
+for band in selected_bands:
+    bits[bit_length - band] = "1"
+
+byte_values = [
+    str(int("".join(bits[index:index + 8]), 2))
+    for index in range(0, bit_length, 8)
+]
+band_list = ",".join(reversed(byte_values))
+
+lower = js_substring("".join(bits), len(bits) - 25)
+upper = js_substring("".join(bits), len(bits) - 43, len(bits) - 32)
+
+if "1" not in lower:
+    zeact = 0
+elif "1" not in upper:
+    zeact = 1
+else:
+    zeact = 2
+
+wcdma_list = once_data.get("tz_lock_wcdma_band") or "0,0,0"
+tds_list = once_data.get("tz_lock_tds_band") or "0,0"
+
+print(
+    f"band_state={band_state}"
+    f"&band_list={band_list}"
+    f"&wcdma_list={wcdma_list}"
+    f"&tds_list={tds_list}"
+    f"&zeact={zeact}"
+)
+PY
+}
+
+cmd_band() {
+    local action="${1:-show}"
+    local band_state="yes"
+    local selection_mode="user"
+    local current_info
+    local once_data
+    local payload
+
+    case "$action" in
+        show|status|list|"")
+            ensure_login
+            current_info=$(goform_post "goformId=TZ_GET_LOCK_BAND")
+            once_data=$(cmd_get "tz_wcdma_bands,tz_tds_bands,tz_lock_wcdma_band,tz_lock_tds_band")
+            band_lock_report "$current_info" "$once_data" | pretty_json
+            return 0
+            ;;
+        off|disable)
+            band_state="no"
+            selection_mode="current"
+            shift
+            ;;
+        set|enable|lock)
+            shift
+            ;;
+    esac
+
+    if [[ "$selection_mode" == "user" && $# -eq 0 ]]; then
+        echo "band requires at least one LTE band number"
+        return 1
+    fi
+
+    ensure_login
+    current_info=$(goform_post "goformId=TZ_GET_LOCK_BAND")
+    once_data=$(cmd_get "tz_wcdma_bands,tz_tds_bands,tz_lock_wcdma_band,tz_lock_tds_band")
+    payload=$(band_lock_payload "$band_state" "$selection_mode" "$current_info" "$once_data" "$@") || return 1
+    goform_post "goformId=TZ_SET_LOCK_BAND&${payload}" | pretty_json
+}
+
 cmd_help() {
     echo "Globe Router CLI - Commands:"
     echo ""
@@ -403,6 +623,7 @@ cmd_help() {
     echo "  reboot      - Reboot the router"
     echo "  connect     - Connect WAN"
     echo "  disconnect  - Disconnect WAN"
+    echo "  band        - Show or set LTE band lock"
     echo "  raw <cmd>   - Execute custom command"
     echo ""
     echo "Options:"
@@ -464,6 +685,7 @@ main() {
         reboot)      cmd_reboot "$@" ;;
         connect)     cmd_wan_connect "connect" "$@" ;;
         disconnect)  cmd_wan_connect "disconnect" "$@" ;;
+        band)        cmd_band "$@" ;;
         raw)         cmd_raw "$@" ;;
         help|--help|-h) cmd_help ;;
         *)           echo "Unknown command: $command"; cmd_help; exit 1 ;;

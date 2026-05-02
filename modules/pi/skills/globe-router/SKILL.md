@@ -80,6 +80,7 @@ globe <command>
 | `reboot` | Reboot router |
 | `connect` | Connect WAN |
 | `disconnect` | Disconnect WAN |
+| `band` | Show or set LTE band lock |
 | `raw <cmd>` | Custom API command |
 
 ## Router details
@@ -124,3 +125,14 @@ globe raw "realtime_tx_thrpt,realtime_rx_thrpt,realtime_tx_bytes,realtime_rx_byt
 | `REBOOT_DEVICE` | Reboot |
 | `wan_connect` | Connect WAN |
 | `wan_disconnect` | Disconnect WAN |
+
+## Band lock
+
+```bash
+globe band
+globe band 3
+globe band 3,28
+globe band off
+```
+
+Uses the hidden `TZ_GET_LOCK_BAND` and `TZ_SET_LOCK_BAND` goform calls.
