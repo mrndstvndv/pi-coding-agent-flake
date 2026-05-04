@@ -1,414 +1,499 @@
-#!/bin/bash
+#!/usr/bin/env python3
+"""Globe Router CLI - Interact with Globe At Home B9680 Router"""
 
-# Globe Router CLI - Interact with Globe At Home B9680 Router
+from __future__ import annotations
 
-set -u
-
-ROUTER_IP_DEFAULT="192.168.254.254"
-ROUTER_IP="${GLOBE_ROUTER_IP:-$ROUTER_IP_DEFAULT}"
-COOKIE_FILE="/tmp/globe_router_cookies.txt"
-BASE_URL=""
-LOCAL_ENV_FILE="${GLOBE_ROUTER_ENV_FILE:-$HOME/.config/local/globe-router.env}"
-KEYCHAIN_USER_SERVICE="globe-router-user"
-KEYCHAIN_PASS_SERVICE="globe-router-pass"
-
-CLI_ROUTER_USER=""
-CLI_ROUTER_PASS=""
-CLI_ROUTER_IP=""
-RESOLVED_USER=""
-RESOLVED_PASS=""
-
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
-
-set_base_url() {
-    BASE_URL="http://${ROUTER_IP}"
-}
-
-is_darwin() {
-    [[ "$(uname -s)" == "Darwin" ]]
-}
-
-encode_b64() {
-    echo -n "$1" | base64
-}
-
-strip_outer_quotes() {
-    local value="$1"
-
-    if [[ "$value" == \"*\" && "$value" == *\" ]]; then
-        value="${value:1:${#value}-2}"
-    elif [[ "$value" == \'*\' && "$value" == *\' ]]; then
-        value="${value:1:${#value}-2}"
-    fi
-
-    printf '%s' "$value"
-}
-
-read_env_value() {
-    local key="$1"
-    local file="$2"
-    local line
-    local value
-
-    [[ -f "$file" ]] || return 1
-
-    line=$(grep -m1 "^${key}=" "$file" 2>/dev/null || true)
-    [[ -n "$line" ]] || return 1
-
-    value="${line#*=}"
-    value="${value%$'\r'}"
-    strip_outer_quotes "$value"
-}
-
-load_router_ip() {
-    local env_file_ip
-
-    if [[ -n "$CLI_ROUTER_IP" ]]; then
-        ROUTER_IP="$CLI_ROUTER_IP"
-        set_base_url
-        return 0
-    fi
-
-    ROUTER_IP="${GLOBE_ROUTER_IP:-$ROUTER_IP_DEFAULT}"
-
-    env_file_ip=$(read_env_value "GLOBE_ROUTER_IP" "$LOCAL_ENV_FILE" || true)
-    if [[ -n "$env_file_ip" ]]; then
-        ROUTER_IP="$env_file_ip"
-    fi
-
-    set_base_url
-}
-
-load_from_keychain() {
-    local keychain_user
-    local keychain_pass
-
-    command -v security >/dev/null 2>&1 || return 1
-
-    if [[ -z "$RESOLVED_USER" ]]; then
-        keychain_user=$(security find-generic-password -s "$KEYCHAIN_USER_SERVICE" -a default -w 2>/dev/null || true)
-        [[ -n "$keychain_user" ]] || return 1
-        RESOLVED_USER="$keychain_user"
-    fi
-
-    if [[ -z "$RESOLVED_PASS" ]]; then
-        keychain_pass=$(security find-generic-password -s "$KEYCHAIN_PASS_SERVICE" -a "$RESOLVED_USER" -w 2>/dev/null || true)
-        [[ -n "$keychain_pass" ]] || return 1
-        RESOLVED_PASS="$keychain_pass"
-    fi
-
-    return 0
-}
-
-load_from_env_file() {
-    local env_user
-    local env_pass
-
-    [[ -f "$LOCAL_ENV_FILE" ]] || return 1
-
-    env_user=$(read_env_value "GLOBE_ROUTER_USER" "$LOCAL_ENV_FILE" || true)
-    env_pass=$(read_env_value "GLOBE_ROUTER_PASS" "$LOCAL_ENV_FILE" || true)
-
-    [[ -z "$RESOLVED_USER" && -n "$env_user" ]] && RESOLVED_USER="$env_user"
-    [[ -z "$RESOLVED_PASS" && -n "$env_pass" ]] && RESOLVED_PASS="$env_pass"
-
-    [[ -n "$RESOLVED_USER" && -n "$RESOLVED_PASS" ]]
-}
-
-save_to_keychain() {
-    local username="$1"
-    local password="$2"
-
-    command -v security >/dev/null 2>&1 || return 1
-
-    security add-generic-password -U -s "$KEYCHAIN_USER_SERVICE" -a default -w "$username" >/dev/null
-    security add-generic-password -U -s "$KEYCHAIN_PASS_SERVICE" -a "$username" -w "$password" >/dev/null
-}
-
-save_to_env_file() {
-    local username="$1"
-    local password="$2"
-
-    mkdir -p "$(dirname "$LOCAL_ENV_FILE")"
-    umask 077
-
-    {
-        printf 'GLOBE_ROUTER_USER=%s\n' "$username"
-        printf 'GLOBE_ROUTER_PASS=%s\n' "$password"
-        printf 'GLOBE_ROUTER_IP=%s\n' "$ROUTER_IP"
-    } > "$LOCAL_ENV_FILE"
-
-    chmod 600 "$LOCAL_ENV_FILE"
-}
-
-prompt_to_persist_credentials() {
-    local choice
-    local default_choice="n"
-
-    if is_darwin && command -v security >/dev/null 2>&1; then
-        default_choice="k"
-    fi
-
-    echo ""
-    printf 'Save credentials? [k]eychain/[f]ile/[n]o (default: %s): ' "$default_choice"
-    read -r choice
-    choice="${choice:-$default_choice}"
-    choice=$(printf '%s' "$choice" | tr '[:upper:]' '[:lower:]')
-
-    case "$choice" in
-        k|keychain)
-            if save_to_keychain "$RESOLVED_USER" "$RESOLVED_PASS"; then
-                echo "Saved to macOS Keychain."
-                return 0
-            fi
-            echo -e "${RED}Failed to save to Keychain.${NC}"
-            return 1
-            ;;
-        f|file)
-            save_to_env_file "$RESOLVED_USER" "$RESOLVED_PASS"
-            echo "Saved to $LOCAL_ENV_FILE"
-            return 0
-            ;;
-        n|no)
-            return 0
-            ;;
-        *)
-            echo "Skipping save."
-            return 0
-            ;;
-    esac
-}
-
-prompt_for_credentials() {
-    local input_user
-    local input_pass
-    local default_user
-
-    [[ -t 0 ]] || {
-        echo "Credentials not found and no TTY available."
-        echo "Use --user/--pass, environment variables, Keychain, or $LOCAL_ENV_FILE"
-        return 1
-    }
-
-    default_user="${RESOLVED_USER:-admin}"
-
-    printf 'Router username [%s]: ' "$default_user"
-    read -r input_user
-    RESOLVED_USER="${input_user:-$default_user}"
-
-    printf 'Router password: '
-    read -rs input_pass
-    echo ""
-
-    [[ -n "$input_pass" ]] || {
-        echo "Password is required."
-        return 1
-    }
-
-    RESOLVED_PASS="$input_pass"
-    prompt_to_persist_credentials
-}
-
-resolve_credentials() {
-    [[ -n "$RESOLVED_USER" && -n "$RESOLVED_PASS" ]] && return 0
-
-    [[ -z "$RESOLVED_USER" && -n "$CLI_ROUTER_USER" ]] && RESOLVED_USER="$CLI_ROUTER_USER"
-    [[ -z "$RESOLVED_PASS" && -n "$CLI_ROUTER_PASS" ]] && RESOLVED_PASS="$CLI_ROUTER_PASS"
-
-    [[ -z "$RESOLVED_USER" && -n "${GLOBE_ROUTER_USER:-}" ]] && RESOLVED_USER="$GLOBE_ROUTER_USER"
-    [[ -z "$RESOLVED_PASS" && -n "${GLOBE_ROUTER_PASS:-}" ]] && RESOLVED_PASS="$GLOBE_ROUTER_PASS"
-
-    [[ -n "$RESOLVED_USER" && -n "$RESOLVED_PASS" ]] && return 0
-    load_from_keychain && [[ -n "$RESOLVED_USER" && -n "$RESOLVED_PASS" ]] && return 0
-    load_from_env_file && [[ -n "$RESOLVED_USER" && -n "$RESOLVED_PASS" ]] && return 0
-    prompt_for_credentials
-}
-
-check_login() {
-    local response
-
-    response=$(curl -s -k -c "$COOKIE_FILE" -b "$COOKIE_FILE" \
-        -X POST "${BASE_URL}/goform/goform_get_cmd_process" \
-        -H "Content-Type: application/x-www-form-urlencoded" \
-        -d "isTest=false&cmd=loginfo&multi_data=1")
-
-    echo "$response" | grep -q '"loginfo":"ok"'
-}
-
-login() {
-    local user_b64
-    local pass_b64
-    local response
-
-    resolve_credentials || return 1
-
-    user_b64=$(encode_b64 "$RESOLVED_USER")
-    pass_b64=$(encode_b64 "$RESOLVED_PASS")
-
-    echo -n "Logging in as $RESOLVED_USER... "
-
-    response=$(curl -s -k -c "$COOKIE_FILE" -b "$COOKIE_FILE" \
-        -X POST "${BASE_URL}/goform/goform_set_cmd_process" \
-        -H "Content-Type: application/x-www-form-urlencoded" \
-        -d "isTest=false&goformId=LOGIN&username=${user_b64}&password=${pass_b64}")
-
-    if echo "$response" | grep -q '"result":"0"'; then
-        echo -e "${GREEN}Success!${NC}"
-        return 0
-    fi
-
-    echo -e "${RED}Failed!${NC}"
-    echo "Response: $response"
-    return 1
-}
-
-ensure_login() {
-    if check_login; then
-        return 0
-    fi
-
-    if ! login; then
-        echo -e "${RED}Login failed.${NC}"
-        exit 1
-    fi
-}
-
-cmd_get() {
-    local cmd="$1"
-    local multi="${2:-1}"
-
-    curl -s -k -c "$COOKIE_FILE" -b "$COOKIE_FILE" \
-        -X POST "${BASE_URL}/goform/goform_get_cmd_process" \
-        -H "Content-Type: application/x-www-form-urlencoded" \
-        -d "isTest=false&cmd=${cmd}&multi_data=${multi}"
-}
-
-pretty_json() {
-    jq . 2>/dev/null || python3 -m json.tool 2>/dev/null || cat
-}
-
-cmd_setup() {
-    RESOLVED_USER=""
-    RESOLVED_PASS=""
-    prompt_for_credentials || return 1
-    echo -e "${GREEN}Credentials ready.${NC}"
-}
-
-cmd_status() {
-    ensure_login
-    cmd_get "modem_main_state,network_type,sim_status,lte_plmn,lte_rsrq,lte_rssi1,lte_sinr,lte_pci,lte_enodebid,lte_cellid,wan_ipaddr,lan_ipaddr,ppp_status,rj45_state,sta_count,simcard_roam,SSID1,loginfo" | pretty_json
-}
-
-cmd_traffic() {
-    ensure_login
-    cmd_get "realtime_tx_thrpt,realtime_rx_thrpt,realtime_tx_bytes,realtime_rx_bytes,realtime_time,monthly_tx_bytes,monthly_rx_bytes,monthly_time" | pretty_json
-}
-
-cmd_device() {
-    ensure_login
-    cmd_get "wifi_coverage,m_ssid_enable,imei,cr_version,hardware_version,MAX_Access_num,SSID1,AuthMode,WPAPSK1_encode,m_SSID,m_AuthMode,m_WPAPSK1_encode,m_MAX_Access_num,lan_ipaddr,mac_address,msisdn,LocalDomain,wan_ipaddr,ipv6_wan_ipaddr,pdp_type,ppp_status,ethwan_mode" | pretty_json
-}
-
-cmd_wan() {
-    ensure_login
-    cmd_get "blc_wan_mode,blc_wan_auto_mode,dial_mode,ethwan_mode,default_wan_name,roam_setting_option,apn_name,apn_type,pdp_type,static_wan_ipaddr,static_wan_netmask,static_wan_gateway" | pretty_json
-}
-
-cmd_reboot() {
-    local i
-
-    ensure_login
-
-    echo -e "${YELLOW}Rebooting router... This will take ~30 seconds${NC}"
-
-    curl -s -k -c "$COOKIE_FILE" -b "$COOKIE_FILE" \
-        -X POST "${BASE_URL}/goform/goform_set_cmd_process" \
-        -H "Content-Type: application/x-www-form-urlencoded" \
-        -d "isTest=false&goformId=REBOOT_DEVICE" >/dev/null 2>&1
-
-    echo -n "Waiting for router to come back"
-    for i in {1..30}; do
-        sleep 1
-        echo -n "."
-        if curl -s -k -o /dev/null "${BASE_URL}/" 2>/dev/null; then
-            echo -e " ${GREEN}Router is back!${NC}"
-            sleep 2
-            login >/dev/null 2>&1 || true
-            echo -e "${GREEN}Reboot complete!${NC}"
-            return 0
-        fi
-    done
-
-    echo -e "\n${RED}Router did not respond. Check manually.${NC}"
-    return 1
-}
-
-cmd_wan_connect() {
-    local action="${1:-connect}"
-    local goform_id="wan_connect"
-
-    ensure_login
-
-    if [[ "$action" != "connect" ]]; then
-        goform_id="wan_disconnect"
-    fi
-
-    curl -s -k -c "$COOKIE_FILE" -b "$COOKIE_FILE" \
-        -X POST "${BASE_URL}/goform/goform_set_cmd_process" \
-        -H "Content-Type: application/x-www-form-urlencoded" \
-        -d "isTest=false&goformId=${goform_id}" | pretty_json
-}
-
-cmd_wifi() {
-    ensure_login
-    cmd_get "SSID1,AuthMode,WPAPSK1_encode,m_SSID,m_AuthMode,m_WPAPSK1_encode,m_ssid_enable,sta_count,m_sta_count,wifi_cur_state,wifi_coverage" | pretty_json
-}
-
-cmd_sms() {
-    ensure_login
-    cmd_get "sms_received_flag,sts_received_flag,sms_unread_num" | pretty_json
-}
-
-cmd_signal() {
-    ensure_login
-    cmd_get "modem_main_state,network_type,lte_plmn,lte_rsrq,lte_rssi1,lte_sinr,lte_pci,lte_enodebid,lte_cellid,simcard_roam,web_signal" | pretty_json
-}
-
-cmd_raw() {
-    local cmd="${1:-}"
-
-    [[ -n "$cmd" ]] || {
-        echo "raw requires a command string"
-        exit 1
-    }
-
-    ensure_login
-    cmd_get "$cmd" | pretty_json
-}
-
-goform_post() {
-    local data="$1"
-
-    curl -s -k -c "$COOKIE_FILE" -b "$COOKIE_FILE" \
-        -X POST "${BASE_URL}/goform/goform_set_cmd_process" \
-        -H "Content-Type: application/x-www-form-urlencoded" \
-        -d "isTest=false&${data}"
-}
-
-band_lock_report() {
-    local current_info="$1"
-    local once_data="$2"
-
-    python3 - "$current_info" "$once_data" <<'PY'
+import base64
+import contextlib
+import getpass
 import json
 import math
+import os
+import re
+import stat
+import subprocess
 import sys
+import tempfile
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from http.cookiejar import LWPCookieJar
+from pathlib import Path
+
+ROUTER_IP_DEFAULT = "192.168.254.254"
+ROUTER_IP = os.environ.get("GLOBE_ROUTER_IP", ROUTER_IP_DEFAULT)
+COOKIE_FILE = "/tmp/globe_router_cookies.txt"
+BASE_URL = ""
+LOCAL_ENV_FILE = os.environ.get(
+    "GLOBE_ROUTER_ENV_FILE", os.path.expanduser("~/.config/local/globe-router.env")
+)
+KEYCHAIN_USER_SERVICE = "globe-router-user"
+KEYCHAIN_PASS_SERVICE = "globe-router-pass"
+
+CLI_ROUTER_USER = ""
+CLI_ROUTER_PASS = ""
+CLI_ROUTER_IP = ""
+RESOLVED_USER = ""
+RESOLVED_PASS = ""
+
+RED = "\033[0;31m"
+GREEN = "\033[0;32m"
+YELLOW = "\033[1;33m"
+NC = "\033[0m"
 
 
-def js_substring(value, start, end=None):
+def is_darwin() -> bool:
+    return sys.platform == "darwin"
+
+
+def set_base_url() -> None:
+    global BASE_URL
+    BASE_URL = f"http://{ROUTER_IP}"
+
+
+def encode_b64(value: str) -> str:
+    return base64.b64encode(value.encode()).decode()
+
+
+def strip_outer_quotes(value: str) -> str:
+    if len(value) >= 2 and ((value[0] == '"' and value[-1] == '"') or (value[0] == "'" and value[-1] == "'")):
+        return value[1:-1]
+    return value
+
+
+def read_env_value(key: str, file_path: str) -> str | None:
+    path = Path(file_path)
+    if not path.is_file():
+        return None
+
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                if line.startswith(f"{key}="):
+                    value = line.split("=", 1)[1].rstrip("\r\n")
+                    return strip_outer_quotes(value)
+    except OSError:
+        return None
+    return None
+
+
+def load_router_ip() -> None:
+    global ROUTER_IP
+
+    if CLI_ROUTER_IP:
+        ROUTER_IP = CLI_ROUTER_IP
+        set_base_url()
+        return
+
+    ROUTER_IP = os.environ.get("GLOBE_ROUTER_IP", ROUTER_IP_DEFAULT)
+    env_file_ip = read_env_value("GLOBE_ROUTER_IP", LOCAL_ENV_FILE)
+    if env_file_ip:
+        ROUTER_IP = env_file_ip
+
+    set_base_url()
+
+
+def cookie_jar() -> LWPCookieJar:
+    jar = LWPCookieJar(COOKIE_FILE)
+    try:
+        jar.load(ignore_discard=True, ignore_expires=True)
+    except FileNotFoundError:
+        pass
+    except Exception:
+        # Start fresh if the cookie file is corrupted or unreadable.
+        with contextlib.suppress(Exception):
+            Path(COOKIE_FILE).unlink()
+    return jar
+
+
+_COOKIE_JAR = cookie_jar()
+_OPENER = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(_COOKIE_JAR))
+
+
+def save_cookies() -> None:
+    with contextlib.suppress(Exception):
+        _COOKIE_JAR.save(ignore_discard=True, ignore_expires=True)
+
+
+def http_post(path: str, data: dict[str, str] | str, *, content_type: str = "application/x-www-form-urlencoded") -> str:
+    if isinstance(data, dict):
+        body = urllib.parse.urlencode(data).encode()
+    else:
+        body = data.encode()
+
+    req = urllib.request.Request(
+        f"{BASE_URL}{path}",
+        data=body,
+        headers={"Content-Type": content_type},
+        method="POST",
+    )
+    try:
+        with _OPENER.open(req, timeout=30) as resp:
+            text = resp.read().decode("utf-8", errors="replace")
+            save_cookies()
+            return text
+    except urllib.error.URLError as exc:
+        raise RuntimeError(str(exc)) from exc
+
+
+def http_get(path: str) -> str:
+    req = urllib.request.Request(f"{BASE_URL}{path}", method="GET")
+    try:
+        with _OPENER.open(req, timeout=30) as resp:
+            text = resp.read().decode("utf-8", errors="replace")
+            save_cookies()
+            return text
+    except urllib.error.URLError as exc:
+        raise RuntimeError(str(exc)) from exc
+
+
+def load_from_keychain() -> bool:
+    global RESOLVED_USER, RESOLVED_PASS
+
+    if subprocess.run(["sh", "-lc", "command -v security >/dev/null 2>&1"], check=False).returncode != 0:
+        return False
+
+    if not RESOLVED_USER:
+        user = subprocess.run(
+            ["security", "find-generic-password", "-s", KEYCHAIN_USER_SERVICE, "-a", "default", "-w"],
+            capture_output=True,
+            text=True,
+            check=False,
+        ).stdout.strip()
+        if not user:
+            return False
+        RESOLVED_USER = user
+
+    if not RESOLVED_PASS:
+        password = subprocess.run(
+            ["security", "find-generic-password", "-s", KEYCHAIN_PASS_SERVICE, "-a", RESOLVED_USER, "-w"],
+            capture_output=True,
+            text=True,
+            check=False,
+        ).stdout.strip()
+        if not password:
+            return False
+        RESOLVED_PASS = password
+
+    return True
+
+
+def load_from_env_file() -> bool:
+    global RESOLVED_USER, RESOLVED_PASS
+
+    env_user = read_env_value("GLOBE_ROUTER_USER", LOCAL_ENV_FILE)
+    env_pass = read_env_value("GLOBE_ROUTER_PASS", LOCAL_ENV_FILE)
+
+    if not RESOLVED_USER and env_user:
+        RESOLVED_USER = env_user
+    if not RESOLVED_PASS and env_pass:
+        RESOLVED_PASS = env_pass
+
+    return bool(RESOLVED_USER and RESOLVED_PASS)
+
+
+def save_to_keychain(username: str, password: str) -> bool:
+    if subprocess.run(["sh", "-lc", "command -v security >/dev/null 2>&1"], check=False).returncode != 0:
+        return False
+
+    r1 = subprocess.run(
+        ["security", "add-generic-password", "-U", "-s", KEYCHAIN_USER_SERVICE, "-a", "default", "-w", username],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    r2 = subprocess.run(
+        ["security", "add-generic-password", "-U", "-s", KEYCHAIN_PASS_SERVICE, "-a", username, "-w", password],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    return r1.returncode == 0 and r2.returncode == 0
+
+
+def save_to_env_file(username: str, password: str) -> None:
+    path = Path(LOCAL_ENV_FILE)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    old_umask = os.umask(0o077)
+    try:
+        path.write_text(
+            f"GLOBE_ROUTER_USER={username}\nGLOBE_ROUTER_PASS={password}\nGLOBE_ROUTER_IP={ROUTER_IP}\n",
+            encoding="utf-8",
+        )
+    finally:
+        os.umask(old_umask)
+    os.chmod(path, 0o600)
+
+
+def prompt_to_persist_credentials() -> bool:
+    default_choice = "k" if is_darwin() and subprocess.run(["sh", "-lc", "command -v security >/dev/null 2>&1"], check=False).returncode == 0 else "n"
+
+    print()
+    choice = input(f"Save credentials? [k]eychain/[f]ile/[n]o (default: {default_choice}): ").strip().lower()
+    if not choice:
+        choice = default_choice
+
+    if choice in {"k", "keychain"}:
+        if save_to_keychain(RESOLVED_USER, RESOLVED_PASS):
+            print("Saved to macOS Keychain.")
+            return True
+        print(f"{RED}Failed to save to Keychain.{NC}")
+        return False
+    if choice in {"f", "file"}:
+        save_to_env_file(RESOLVED_USER, RESOLVED_PASS)
+        print(f"Saved to {LOCAL_ENV_FILE}")
+        return True
+    if choice in {"n", "no"}:
+        return True
+
+    print("Skipping save.")
+    return True
+
+
+def prompt_for_credentials() -> bool:
+    global RESOLVED_USER, RESOLVED_PASS
+
+    if not sys.stdin.isatty():
+        print("Credentials not found and no TTY available.")
+        print(f"Use --user/--pass, environment variables, Keychain, or {LOCAL_ENV_FILE}")
+        return False
+
+    default_user = RESOLVED_USER or "admin"
+    input_user = input(f"Router username [{default_user}]: ").strip()
+    RESOLVED_USER = input_user or default_user
+
+    try:
+        input_pass = getpass.getpass("Router password: ")
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return False
+
+    if not input_pass:
+        print("Password is required.")
+        return False
+
+    RESOLVED_PASS = input_pass
+    return prompt_to_persist_credentials()
+
+
+def resolve_credentials() -> bool:
+    global RESOLVED_USER, RESOLVED_PASS
+
+    if RESOLVED_USER and RESOLVED_PASS:
+        return True
+
+    if not RESOLVED_USER and CLI_ROUTER_USER:
+        RESOLVED_USER = CLI_ROUTER_USER
+    if not RESOLVED_PASS and CLI_ROUTER_PASS:
+        RESOLVED_PASS = CLI_ROUTER_PASS
+
+    if not RESOLVED_USER and os.environ.get("GLOBE_ROUTER_USER"):
+        RESOLVED_USER = os.environ["GLOBE_ROUTER_USER"]
+    if not RESOLVED_PASS and os.environ.get("GLOBE_ROUTER_PASS"):
+        RESOLVED_PASS = os.environ["GLOBE_ROUTER_PASS"]
+
+    if RESOLVED_USER and RESOLVED_PASS:
+        return True
+    if load_from_keychain() and RESOLVED_USER and RESOLVED_PASS:
+        return True
+    if load_from_env_file() and RESOLVED_USER and RESOLVED_PASS:
+        return True
+    return prompt_for_credentials()
+
+
+def check_login() -> bool:
+    try:
+        response = http_post(
+            "/goform/goform_get_cmd_process",
+            {"isTest": "false", "cmd": "loginfo", "multi_data": "1"},
+        )
+    except RuntimeError:
+        return False
+    return '"loginfo":"ok"' in response
+
+
+def login() -> bool:
+    global RESOLVED_USER, RESOLVED_PASS
+
+    if not resolve_credentials():
+        return False
+
+    user_b64 = encode_b64(RESOLVED_USER)
+    pass_b64 = encode_b64(RESOLVED_PASS)
+
+    print(f"Logging in as {RESOLVED_USER}... ", end="", flush=True)
+    response = http_post(
+        "/goform/goform_set_cmd_process",
+        {
+            "isTest": "false",
+            "goformId": "LOGIN",
+            "username": user_b64,
+            "password": pass_b64,
+        },
+    )
+
+    if '"result":"0"' in response:
+        print(f"{GREEN}Success!{NC}")
+        return True
+
+    print(f"{RED}Failed!{NC}")
+    print(f"Response: {response}")
+    return False
+
+
+def ensure_login() -> None:
+    if check_login():
+        return
+    if not login():
+        print(f"{RED}Login failed.{NC}")
+        raise SystemExit(1)
+
+
+def cmd_get(cmd: str, multi: str = "1") -> str:
+    return http_post(
+        "/goform/goform_get_cmd_process",
+        {"isTest": "false", "cmd": cmd, "multi_data": multi},
+    )
+
+
+def pretty_json(text: str) -> str:
+    try:
+        obj = json.loads(text)
+    except Exception:
+        return text
+    return json.dumps(obj, indent=2, ensure_ascii=False)
+
+
+def cmd_setup() -> None:
+    global RESOLVED_USER, RESOLVED_PASS
+    RESOLVED_USER = ""
+    RESOLVED_PASS = ""
+    if not prompt_for_credentials():
+        raise SystemExit(1)
+    print(f"{GREEN}Credentials ready.{NC}")
+
+
+def cmd_status() -> None:
+    ensure_login()
+    print(
+        pretty_json(
+            cmd_get(
+                "modem_main_state,network_type,sim_status,lte_plmn,lte_rsrq,lte_rssi1,lte_sinr,lte_pci,lte_enodebid,lte_cellid,wan_ipaddr,lan_ipaddr,ppp_status,rj45_state,sta_count,simcard_roam,SSID1,loginfo"
+            )
+        )
+    )
+
+
+def cmd_traffic() -> None:
+    ensure_login()
+    print(
+        pretty_json(
+            cmd_get(
+                "realtime_tx_thrpt,realtime_rx_thrpt,realtime_tx_bytes,realtime_rx_bytes,realtime_time,monthly_tx_bytes,monthly_rx_bytes,monthly_time"
+            )
+        )
+    )
+
+
+def cmd_device() -> None:
+    ensure_login()
+    print(
+        pretty_json(
+            cmd_get(
+                "wifi_coverage,m_ssid_enable,imei,cr_version,hardware_version,MAX_Access_num,SSID1,AuthMode,WPAPSK1_encode,m_SSID,m_AuthMode,m_WPAPSK1_encode,m_MAX_Access_num,lan_ipaddr,mac_address,msisdn,LocalDomain,wan_ipaddr,ipv6_wan_ipaddr,pdp_type,ppp_status,ethwan_mode"
+            )
+        )
+    )
+
+
+def cmd_wan() -> None:
+    ensure_login()
+    print(
+        pretty_json(
+            cmd_get(
+                "blc_wan_mode,blc_wan_auto_mode,dial_mode,ethwan_mode,default_wan_name,roam_setting_option,apn_name,apn_type,pdp_type,static_wan_ipaddr,static_wan_netmask,static_wan_gateway"
+            )
+        )
+    )
+
+
+def cmd_reboot() -> None:
+    ensure_login()
+    print(f"{YELLOW}Rebooting router... This will take ~30 seconds{NC}")
+    http_post(
+        "/goform/goform_set_cmd_process",
+        {"isTest": "false", "goformId": "REBOOT_DEVICE"},
+    )
+
+    print("Waiting for router to come back", end="", flush=True)
+    for _ in range(30):
+        time.sleep(1)
+        print(".", end="", flush=True)
+        try:
+            http_get("/")
+            print(f" {GREEN}Router is back!{NC}")
+            time.sleep(2)
+            with contextlib.suppress(Exception):
+                login()
+            print(f"{GREEN}Reboot complete!{NC}")
+            return
+        except RuntimeError:
+            pass
+
+    print(f"\n{RED}Router did not respond. Check manually.{NC}")
+    raise SystemExit(1)
+
+
+def cmd_wan_connect(action: str = "connect") -> None:
+    ensure_login()
+    goform_id = "wan_connect" if action == "connect" else "wan_disconnect"
+    print(pretty_json(http_post(
+        "/goform/goform_set_cmd_process",
+        {"isTest": "false", "goformId": goform_id},
+    )))
+
+
+def cmd_wifi() -> None:
+    ensure_login()
+    print(
+        pretty_json(
+            cmd_get("SSID1,AuthMode,WPAPSK1_encode,m_SSID,m_AuthMode,m_WPAPSK1_encode,m_ssid_enable,sta_count,m_sta_count,wifi_cur_state,wifi_coverage")
+        )
+    )
+
+
+def cmd_sms() -> None:
+    ensure_login()
+    print(pretty_json(cmd_get("sms_received_flag,sts_received_flag,sms_unread_num")))
+
+
+def cmd_signal() -> None:
+    ensure_login()
+    print(
+        pretty_json(
+            cmd_get("modem_main_state,network_type,lte_plmn,lte_rsrq,lte_rssi1,lte_sinr,lte_pci,lte_enodebid,lte_cellid,simcard_roam,web_signal")
+        )
+    )
+
+
+def cmd_raw(args: list[str]) -> None:
+    cmd = args[0] if args else ""
+    if not cmd:
+        print("raw requires a command string")
+        raise SystemExit(1)
+    ensure_login()
+    print(pretty_json(cmd_get(cmd)))
+
+
+def goform_post(data: str) -> str:
+    return http_post(
+        "/goform/goform_set_cmd_process",
+        f"isTest=false&{data}",
+    )
+
+
+def js_substring(value: str, start: int, end: int | None = None) -> str:
     length = len(value)
     start = max(0, start)
     end = length if end is None else max(0, end)
@@ -417,7 +502,7 @@ def js_substring(value, start, end=None):
     return value[start:end]
 
 
-def build_band_list(selected_bands, supported_bands):
+def build_band_list(selected_bands: list[int], supported_bands: list[int]) -> tuple[str, int]:
     if not supported_bands:
         return "", 0
 
@@ -445,251 +530,193 @@ def build_band_list(selected_bands, supported_bands):
     return band_list, zeact
 
 
-current_info = json.loads(sys.argv[1])
-once_data = json.loads(sys.argv[2])
-
-supported_bands = sorted(
-    int(key[4:])
-    for key in current_info
-    if key.startswith("band") and key[4:].isdigit()
-)
-selected_bands = [
-    band for band in supported_bands
-    if str(current_info.get(f"band{band}", "")) == "1"
-]
-band_list, zeact = build_band_list(selected_bands, supported_bands)
-
-summary = {
-    "band_state": current_info.get("band_state", ""),
-    "supported_bands": supported_bands,
-    "selected_bands": selected_bands,
-    "band_list": band_list,
-    "wcdma_list": once_data.get("tz_lock_wcdma_band") or "0,0,0",
-    "tds_list": once_data.get("tz_lock_tds_band") or "0,0",
-    "zeact": zeact,
-}
-print(json.dumps(summary))
-PY
-}
-
-band_lock_payload() {
-    local band_state="$1"
-    local selection_mode="$2"
-    local current_info="$3"
-    local once_data="$4"
-    shift 4
-
-    python3 - "$band_state" "$selection_mode" "$current_info" "$once_data" "$@" <<'PY'
-import json
-import math
-import re
-import sys
+def band_lock_report(current_info: dict, once_data: dict) -> dict:
+    supported_bands = sorted(
+        int(key[4:])
+        for key in current_info
+        if key.startswith("band") and key[4:].isdigit()
+    )
+    selected_bands = [band for band in supported_bands if str(current_info.get(f"band{band}", "")) == "1"]
+    band_list, zeact = build_band_list(selected_bands, supported_bands)
+    return {
+        "band_state": current_info.get("band_state", ""),
+        "supported_bands": supported_bands,
+        "selected_bands": selected_bands,
+        "band_list": band_list,
+        "wcdma_list": once_data.get("tz_lock_wcdma_band") or "0,0,0",
+        "tds_list": once_data.get("tz_lock_tds_band") or "0,0",
+        "zeact": zeact,
+    }
 
 
-def js_substring(value, start, end=None):
-    length = len(value)
-    start = max(0, start)
-    end = length if end is None else max(0, end)
-    if start > end:
-        start, end = end, start
-    return value[start:end]
+def band_lock_payload(
+    band_state: str,
+    selection_mode: str,
+    current_info: dict,
+    once_data: dict,
+    raw_args: list[str],
+) -> str:
+    supported_bands = sorted(
+        int(key[4:])
+        for key in current_info
+        if key.startswith("band") and key[4:].isdigit()
+    )
+    if not supported_bands:
+        raise SystemExit("No LTE bands reported by router")
 
+    if selection_mode == "current":
+        selected_bands = [band for band in supported_bands if str(current_info.get(f"band{band}", "")) == "1"]
+    else:
+        tokens: list[str] = []
+        for raw_value in raw_args:
+            tokens.extend([tok for tok in re.split(r"[,\s]+", raw_value) if tok])
 
-band_state = sys.argv[1]
-selection_mode = sys.argv[2]
-current_info = json.loads(sys.argv[3])
-once_data = json.loads(sys.argv[4])
-raw_args = sys.argv[5:]
+        if not tokens:
+            raise SystemExit("No LTE bands specified")
 
-supported_bands = sorted(
-    int(key[4:])
-    for key in current_info
-    if key.startswith("band") and key[4:].isdigit()
-)
-if not supported_bands:
-    raise SystemExit("No LTE bands reported by router")
-
-if selection_mode == "current":
-    selected_bands = [
-        band for band in supported_bands
-        if str(current_info.get(f"band{band}", "")) == "1"
-    ]
-else:
-    tokens = []
-    for raw_value in raw_args:
-        tokens.extend(
-            token for token in re.split(r"[,\s]+", raw_value) if token
-        )
-
-    if not tokens:
-        raise SystemExit("No LTE bands specified")
-
-    selected_bands = []
-    for token in tokens:
-        if token.lower() == "all":
-            selected_bands = supported_bands[:]
-            break
-        if not token.isdigit():
-            raise SystemExit(f"Invalid band: {token}")
-        band = int(token)
-        if band not in supported_bands:
-            raise SystemExit(f"Unsupported band: {band}")
-        if band not in selected_bands:
-            selected_bands.append(band)
-
-bit_length = math.ceil(max(supported_bands) / 8) * 8
-bits = ["0"] * bit_length
-for band in selected_bands:
-    bits[bit_length - band] = "1"
-
-byte_values = [
-    str(int("".join(bits[index:index + 8]), 2))
-    for index in range(0, bit_length, 8)
-]
-band_list = ",".join(reversed(byte_values))
-
-lower = js_substring("".join(bits), len(bits) - 25)
-upper = js_substring("".join(bits), len(bits) - 43, len(bits) - 32)
-
-if "1" not in lower:
-    zeact = 0
-elif "1" not in upper:
-    zeact = 1
-else:
-    zeact = 2
-
-wcdma_list = once_data.get("tz_lock_wcdma_band") or "0,0,0"
-tds_list = once_data.get("tz_lock_tds_band") or "0,0"
-
-print(
-    f"band_state={band_state}"
-    f"&band_list={band_list}"
-    f"&wcdma_list={wcdma_list}"
-    f"&tds_list={tds_list}"
-    f"&zeact={zeact}"
-)
-PY
-}
-
-cmd_band() {
-    local action="${1:-show}"
-    local band_state="yes"
-    local selection_mode="user"
-    local current_info
-    local once_data
-    local payload
-
-    case "$action" in
-        show|status|list|"")
-            ensure_login
-            current_info=$(goform_post "goformId=TZ_GET_LOCK_BAND")
-            once_data=$(cmd_get "tz_wcdma_bands,tz_tds_bands,tz_lock_wcdma_band,tz_lock_tds_band")
-            band_lock_report "$current_info" "$once_data" | pretty_json
-            return 0
-            ;;
-        off|disable)
-            band_state="no"
-            selection_mode="current"
-            shift
-            ;;
-        set|enable|lock)
-            shift
-            ;;
-    esac
-
-    if [[ "$selection_mode" == "user" && $# -eq 0 ]]; then
-        echo "band requires at least one LTE band number"
-        return 1
-    fi
-
-    ensure_login
-    current_info=$(goform_post "goformId=TZ_GET_LOCK_BAND")
-    once_data=$(cmd_get "tz_wcdma_bands,tz_tds_bands,tz_lock_wcdma_band,tz_lock_tds_band")
-    payload=$(band_lock_payload "$band_state" "$selection_mode" "$current_info" "$once_data" "$@") || return 1
-    goform_post "goformId=TZ_SET_LOCK_BAND&${payload}" | pretty_json
-}
-
-cmd_help() {
-    echo "Globe Router CLI - Commands:"
-    echo ""
-    echo "  setup       - Prompt for credentials and optionally save them"
-    echo "  status      - Show basic status (network, IP, connection)"
-    echo "  traffic     - Show traffic data (real-time & monthly)"
-    echo "  device      - Show device information"
-    echo "  wan         - Show WAN settings"
-    echo "  wifi        - Show WiFi settings"
-    echo "  signal      - Show signal information"
-    echo "  sms         - Show SMS info"
-    echo "  reboot      - Reboot the router"
-    echo "  connect     - Connect WAN"
-    echo "  disconnect  - Disconnect WAN"
-    echo "  band        - Show or set LTE band lock"
-    echo "  raw <cmd>   - Execute custom command"
-    echo ""
-    echo "Options:"
-    echo "  --user <username>"
-    echo "  --pass <password>"
-    echo "  --ip <router_ip>"
-    echo ""
-    echo "Credential lookup order:"
-    echo "  1. --user/--pass"
-    echo "  2. GLOBE_ROUTER_USER / GLOBE_ROUTER_PASS"
-    echo "  3. macOS Keychain"
-    echo "  4. $LOCAL_ENV_FILE"
-    echo "  5. Interactive prompt"
-    echo ""
-    echo "Usage: $0 [--user <username>] [--pass <password>] [--ip <router_ip>] <command>"
-}
-
-main() {
-    local command
-
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --user)
-                CLI_ROUTER_USER="${2:-}"
-                shift 2
-                ;;
-            --pass)
-                CLI_ROUTER_PASS="${2:-}"
-                shift 2
-                ;;
-            --ip)
-                CLI_ROUTER_IP="${2:-}"
-                shift 2
-                ;;
-            help|--help|-h)
-                cmd_help
-                return 0
-                ;;
-            *)
+        selected_bands = []
+        for token in tokens:
+            if token.lower() == "all":
+                selected_bands = supported_bands[:]
                 break
-                ;;
-        esac
-    done
+            if not token.isdigit():
+                raise SystemExit(f"Invalid band: {token}")
+            band = int(token)
+            if band not in supported_bands:
+                raise SystemExit(f"Unsupported band: {band}")
+            if band not in selected_bands:
+                selected_bands.append(band)
 
-    load_router_ip
+    band_list, zeact = build_band_list(selected_bands, supported_bands)
+    wcdma_list = once_data.get("tz_lock_wcdma_band") or "0,0,0"
+    tds_list = once_data.get("tz_lock_tds_band") or "0,0"
+    return f"band_state={band_state}&band_list={band_list}&wcdma_list={wcdma_list}&tds_list={tds_list}&zeact={zeact}"
 
-    command="${1:-help}"
-    shift || true
 
-    case "$command" in
-        setup)       cmd_setup "$@" ;;
-        status)      cmd_status "$@" ;;
-        traffic)     cmd_traffic "$@" ;;
-        device)      cmd_device "$@" ;;
-        wan)         cmd_wan "$@" ;;
-        wifi)        cmd_wifi "$@" ;;
-        signal)      cmd_signal "$@" ;;
-        sms)         cmd_sms "$@" ;;
-        reboot)      cmd_reboot "$@" ;;
-        connect)     cmd_wan_connect "connect" "$@" ;;
-        disconnect)  cmd_wan_connect "disconnect" "$@" ;;
-        band)        cmd_band "$@" ;;
-        raw)         cmd_raw "$@" ;;
-        help|--help|-h) cmd_help ;;
-        *)           echo "Unknown command: $command"; cmd_help; exit 1 ;;
-    esac
-}
+def cmd_band(args: list[str]) -> None:
+    action = args[0] if args else "show"
+    band_state = "yes"
+    selection_mode = "user"
 
-main "$@"
+    if action in {"show", "status", "list", ""}:
+        ensure_login()
+        current_info = json.loads(goform_post("goformId=TZ_GET_LOCK_BAND"))
+        once_data = json.loads(cmd_get("tz_wcdma_bands,tz_tds_bands,tz_lock_wcdma_band,tz_lock_tds_band"))
+        print(json.dumps(band_lock_report(current_info, once_data), indent=2, ensure_ascii=False))
+        return
+
+    if action in {"off", "disable"}:
+        band_state = "no"
+        selection_mode = "current"
+        remaining = args[1:]
+    elif action in {"set", "enable", "lock"}:
+        remaining = args[1:]
+    else:
+        remaining = args
+
+    if selection_mode == "user" and not remaining:
+        print("band requires at least one LTE band number")
+        raise SystemExit(1)
+
+    ensure_login()
+    current_info = json.loads(goform_post("goformId=TZ_GET_LOCK_BAND"))
+    once_data = json.loads(cmd_get("tz_wcdma_bands,tz_tds_bands,tz_lock_wcdma_band,tz_lock_tds_band"))
+    payload = band_lock_payload(band_state, selection_mode, current_info, once_data, remaining)
+    print(pretty_json(goform_post(f"goformId=TZ_SET_LOCK_BAND&{payload}")))
+
+
+def cmd_help() -> None:
+    print("Globe Router CLI - Commands:")
+    print()
+    print("  setup       - Prompt for credentials and optionally save them")
+    print("  status      - Show basic status (network, IP, connection)")
+    print("  traffic     - Show traffic data (real-time & monthly)")
+    print("  device      - Show device information")
+    print("  wan         - Show WAN settings")
+    print("  wifi        - Show WiFi settings")
+    print("  signal      - Show signal information")
+    print("  sms         - Show SMS info")
+    print("  reboot      - Reboot the router")
+    print("  connect     - Connect WAN")
+    print("  disconnect  - Disconnect WAN")
+    print("  band        - Show or set LTE band lock")
+    print("  raw <cmd>   - Execute custom command")
+    print()
+    print("Options:")
+    print("  --user <username>")
+    print("  --pass <password>")
+    print("  --ip <router_ip>")
+    print()
+    print("Credential lookup order:")
+    print("  1. --user/--pass")
+    print("  2. GLOBE_ROUTER_USER / GLOBE_ROUTER_PASS")
+    print("  3. macOS Keychain")
+    print(f"  4. {LOCAL_ENV_FILE}")
+    print("  5. Interactive prompt")
+    print()
+    print(f"Usage: {Path(sys.argv[0]).name} [--user <username>] [--pass <password>] [--ip <router_ip>] <command>")
+
+
+def main(argv: list[str]) -> None:
+    global CLI_ROUTER_USER, CLI_ROUTER_PASS, CLI_ROUTER_IP
+
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--user":
+            CLI_ROUTER_USER = argv[i + 1] if i + 1 < len(argv) else ""
+            i += 2
+        elif arg == "--pass":
+            CLI_ROUTER_PASS = argv[i + 1] if i + 1 < len(argv) else ""
+            i += 2
+        elif arg == "--ip":
+            CLI_ROUTER_IP = argv[i + 1] if i + 1 < len(argv) else ""
+            i += 2
+        elif arg in {"help", "--help", "-h"}:
+            cmd_help()
+            return
+        else:
+            break
+
+    load_router_ip()
+
+    remaining = argv[i:]
+    command = remaining[0] if remaining else "help"
+    args = remaining[1:] if remaining else []
+
+    if command == "setup":
+        cmd_setup()
+    elif command == "status":
+        cmd_status()
+    elif command == "traffic":
+        cmd_traffic()
+    elif command == "device":
+        cmd_device()
+    elif command == "wan":
+        cmd_wan()
+    elif command == "wifi":
+        cmd_wifi()
+    elif command == "signal":
+        cmd_signal()
+    elif command == "sms":
+        cmd_sms()
+    elif command == "reboot":
+        cmd_reboot()
+    elif command == "connect":
+        cmd_wan_connect("connect")
+    elif command == "disconnect":
+        cmd_wan_connect("disconnect")
+    elif command == "band":
+        cmd_band(args)
+    elif command == "raw":
+        cmd_raw(args)
+    elif command in {"help", "--help", "-h"}:
+        cmd_help()
+    else:
+        print(f"Unknown command: {command}")
+        cmd_help()
+        raise SystemExit(1)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])
