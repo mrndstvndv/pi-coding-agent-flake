@@ -16,8 +16,8 @@
       ];
       forAllSystems = lib.genAttrs systems;
       packageManifest = builtins.fromJSON (builtins.readFile ./package/package.json);
-      version = packageManifest.dependencies."@mariozechner/pi-coding-agent";
-      npmDepsHash = "sha256-qkLLj0AjHWgOKj0Y46Ng7se++I+WPObydUBr5xfo878=";
+      version = packageManifest.dependencies."@earendil-works/pi-coding-agent";
+      npmDepsHash = "sha256-e2JCpjfmd8EJsND0QVGmtO+Y4QAFHNA55sMwjDZdccg=";
 
       mkPi = system:
         let
@@ -37,14 +37,14 @@
             cp package.json package-lock.json $out/lib/
 
             makeWrapper ${pkgs.nodejs_24}/bin/node $out/bin/pi \
-              --add-flags "$out/lib/node_modules/@mariozechner/pi-coding-agent/dist/cli.js" \
-              --set-default PI_PACKAGE_DIR "$out/lib/node_modules/@mariozechner/pi-coding-agent"
+              --add-flags "$out/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js" \
+              --set-default PI_PACKAGE_DIR "$out/lib/node_modules/@earendil-works/pi-coding-agent"
 
             runHook postInstall
           '';
           meta = with pkgs.lib; {
             description = "pi coding agent CLI";
-            homepage = "https://github.com/badlogic/pi-mono";
+            homepage = "https://github.com/earendil-works/pi-mono";
             license = licenses.mit;
             mainProgram = "pi";
             platforms = platforms.unix;

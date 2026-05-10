@@ -1,6 +1,6 @@
-import { type ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
-import { Text } from "@mariozechner/pi-tui";
+import { Text } from "@earendil-works/pi-tui";
 import { createTimedSignal, DEFAULT_SEARCH_TIMEOUT_MS, truncateOutput } from "./web-tools.js";
 
 const EXA_MCP_URL = "https://mcp.exa.ai/mcp";

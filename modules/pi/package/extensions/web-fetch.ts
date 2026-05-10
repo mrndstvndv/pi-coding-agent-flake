@@ -1,6 +1,6 @@
-import { formatSize, type ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { formatSize, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
-import { Text } from "@mariozechner/pi-tui";
+import { Text } from "@earendil-works/pi-tui";
 import TurndownService from "turndown";
 import {
   createTimedSignal,

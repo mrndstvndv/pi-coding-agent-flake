@@ -1,9 +1,9 @@
 import { readFile, access, constants } from "node:fs/promises";
 import { statSync } from "node:fs";
 import path from "node:path";
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import type { ImageContent } from "@mariozechner/pi-ai";
-import { DynamicBorder } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ImageContent } from "@earendil-works/pi-ai";
+import { DynamicBorder } from "@earendil-works/pi-coding-agent";
 import {
 	Container,
 	Key,
@@ -14,7 +14,7 @@ import {
 	fuzzyFilter,
 	matchesKey,
 	Spacer,
-} from "@mariozechner/pi-tui";
+} from "@earendil-works/pi-tui";
 
 // Image MIME types we support
 const SUPPORTED_IMAGE_MIME_TYPES = new Map<string, string>([

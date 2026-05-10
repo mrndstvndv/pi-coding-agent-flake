@@ -6,8 +6,8 @@
  * System prompt adapted from OpenCode's title agent.
  */
 
-import type { ExtensionAPI, SessionEntry } from "@mariozechner/pi-coding-agent";
-import { BorderedLoader, convertToLlm, serializeConversation } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent";
+import { BorderedLoader, convertToLlm, serializeConversation } from "@earendil-works/pi-coding-agent";
 import { createAcpPool, type AcpPool, type PromptPart } from "./acp-client.js";
 
 const TITLE_MODEL = "gemini-2.5-flash-lite";

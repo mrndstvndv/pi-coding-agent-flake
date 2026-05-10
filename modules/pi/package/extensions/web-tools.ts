@@ -1,4 +1,4 @@
-import { formatSize, truncateHead, type TruncationResult } from "@mariozechner/pi-coding-agent";
+import { formatSize, truncateHead, type TruncationResult } from "@earendil-works/pi-coding-agent";
 
 export const MAX_FETCH_RESPONSE_BYTES = 5 * 1024 * 1024;
 export const DEFAULT_FETCH_TIMEOUT_SECONDS = 30;

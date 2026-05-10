@@ -26,14 +26,14 @@ jobs:
       - name: Fetch latest npm version
         id: fetch-version
         run: |
-          LATEST_VERSION=$(npm view @mariozechner/pi-coding-agent version --json | tr -d '"\n')
+          LATEST_VERSION=$(npm view @earendil-works/pi-coding-agent version --json | tr -d '"\n')
           echo "latest_version=$LATEST_VERSION" >> "$GITHUB_OUTPUT"
           echo "Latest version: $LATEST_VERSION"
 
       - name: Extract current version
         id: current-version
         run: |
-          CURRENT_VERSION=$(jq -r '.dependencies["@mariozechner/pi-coding-agent"]' package/package.json)
+          CURRENT_VERSION=$(jq -r '.dependencies["@earendil-works/pi-coding-agent"]' package/package.json)
           echo "current_version=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
           echo "Current version: $CURRENT_VERSION"
 
@@ -53,7 +53,7 @@ jobs:
         if: steps.compare.outputs.needs_update == 'true'
         run: |
           VERSION="${{ steps.fetch-version.outputs.latest_version }}"
-          jq '.dependencies["@mariozechner/pi-coding-agent"] = "'"$VERSION"'"' package/package.json > package/package.json.tmp
+          jq '.dependencies["@earendil-works/pi-coding-agent"] = "'"$VERSION"'"' package/package.json > package/package.json.tmp
           mv package/package.json.tmp package/package.json
           cd package
           npm install --package-lock-only

@@ -1,6 +1,6 @@
 # pi-coding-agent-flake
 
-Nix flake packaging [pi](https://github.com/badlogic/pi-mono) coding agent with custom extensions, skills, prompt templates, and themes. Home Manager module manages `~/.pi/agent/` declaratively.
+Nix flake packaging [pi](https://github.com/earendil-works/pi-mono) coding agent with custom extensions, skills, prompt templates, and themes. Home Manager module manages `~/.pi/agent/` declaratively.
 
 ## Structure
 

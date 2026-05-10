@@ -1,6 +1,6 @@
 # pi-coding-agent flake
 
-Standalone flake packaging `@mariozechner/pi-coding-agent` as a Nix package and Home Manager module.
+Standalone flake packaging `@earendil-works/pi-coding-agent` as a Nix package and Home Manager module.
 
 ## Outputs
 
@@ -25,7 +25,7 @@ imports = [ inputs.piAgent.homeManagerModules.default ];
 
 The GitHub Actions workflow in `.github/workflows/update-pi.yml`:
 
-- checks npm daily for a new `@mariozechner/pi-coding-agent` version
+- checks npm daily for a new `@earendil-works/pi-coding-agent` version
 - updates `package/package.json`
 - regenerates `package/package-lock.json`
 - recomputes `npmDepsHash`
