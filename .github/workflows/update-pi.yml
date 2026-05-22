@@ -57,6 +57,9 @@ jobs:
           mv package/package.json.tmp package/package.json
           cd package
           npm install --ignore-scripts
+          # Fix integrity hashes missing due to dependency npm-shrinkwrap.json
+          cd ..
+          python3 scripts/fix-lockfile-integrity.py package/package-lock.json
 
       - name: Compute npm deps hash
         if: steps.compare.outputs.needs_update == 'true'
