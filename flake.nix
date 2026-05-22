@@ -29,6 +29,7 @@
           src = ./package;
           nativeBuildInputs = [ pkgs.makeWrapper ];
           dontNpmBuild = true;
+          makeCacheWritable = true;
           installPhase = ''
             runHook preInstall
 
