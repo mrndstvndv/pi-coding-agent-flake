@@ -56,7 +56,7 @@ jobs:
           jq '.dependencies["@earendil-works/pi-coding-agent"] = "'"$VERSION"'"' package/package.json > package/package.json.tmp
           mv package/package.json.tmp package/package.json
           cd package
-          npm install --package-lock-only
+          npm install --ignore-scripts
 
       - name: Compute npm deps hash
         if: steps.compare.outputs.needs_update == 'true'
