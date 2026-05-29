@@ -226,14 +226,16 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 
-			const newSessionResult = await ctx.newSession({ parentSession: currentSessionFile });
+			const newSessionResult = await ctx.newSession({
+				parentSession: currentSessionFile,
+				withSession: async (replacementCtx) => {
+					replacementCtx.ui.setEditorText(editedPrompt);
+					replacementCtx.ui.notify("Handoff ready. Submit when ready.", "info");
+				},
+			});
 			if (newSessionResult.cancelled) {
 				ctx.ui.notify("New session cancelled", "info");
-				return;
 			}
-
-			ctx.ui.setEditorText(editedPrompt);
-			ctx.ui.notify("Handoff ready. Submit when ready.", "info");
 		},
 	});
 }

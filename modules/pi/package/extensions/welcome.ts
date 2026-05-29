@@ -28,6 +28,7 @@ interface WelcomeUi {
 interface WelcomeSessionManager {
 	getEntries(): { type: string }[];
 	getSessionDir(): string;
+	getSessionFile?(): string | undefined;
 }
 
 interface WelcomeContext {
@@ -388,31 +389,35 @@ export default function welcomeExtension(pi: ExtensionAPI): void {
 				return;
 			}
 
-			const result = await ctx.switchSession(session.path);
+			const result = await ctx.switchSession(session.path, {
+				withSession: async (replacementCtx) => {
+					replacementCtx.ui.setEditorText("");
+				},
+			});
 			if (result.cancelled) {
 				return;
 			}
-
-			ctx.ui.setEditorText("");
 		},
 	});
 
-	pi.on("session_start", async (_event, ctx) => {
+	pi.on("session_start", async (event, ctx) => {
 		if (!ctx.hasUI) return;
 
-		markSessionOpened((ctx.sessionManager as { getSessionFile?: () => string | undefined }).getSessionFile?.());
+		markSessionOpened(ctx.sessionManager.getSessionFile?.());
 		await loadRecentSessions(ctx);
-		syncWelcomeWidget(ctx);
+
+		if (event.reason === "startup") {
+			syncWelcomeWidget(ctx);
+		} else {
+			closeWelcomeWidget(ctx);
+		}
+
 		installTerminalInputBridge(ctx);
 	});
 
-	pi.on("session_switch", async (_event, ctx) => {
+	pi.on("session_shutdown", (_event, ctx) => {
 		if (!ctx.hasUI) return;
-
-		markSessionOpened((ctx.sessionManager as { getSessionFile?: () => string | undefined }).getSessionFile?.());
-		await loadRecentSessions(ctx);
-		closeWelcomeWidget(ctx);
-		installTerminalInputBridge(ctx);
+		resetWelcomeState(ctx);
 	});
 
 	pi.on("agent_start", (_event, ctx) => {

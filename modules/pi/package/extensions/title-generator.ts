@@ -275,13 +275,19 @@ function cleanTitle(text: string): string {
 export default function (pi: ExtensionAPI) {
   let titled = false;
   let titling = false;
+  let lifecycleToken = 0;
 
   // Auto-title on first prompt (silent, no loader)
   pi.on("session_start", async (_event, ctx) => {
+    lifecycleToken += 1;
+    titled = false;
+    titling = false;
+
     if (pi.getSessionName()) {
       titled = true;
       return;
     }
+
     const entries = ctx.sessionManager.getBranch();
     const hasUserMessages = entries.some(
       (e): e is SessionEntry & { type: "message" } =>
@@ -290,32 +296,41 @@ export default function (pi: ExtensionAPI) {
     if (hasUserMessages) titled = true;
   });
 
+  pi.on("session_shutdown", () => {
+    lifecycleToken += 1;
+    titling = false;
+  });
+
   pi.on("agent_end", (_event, ctx) => {
     if (titled || titling) return;
-    titling = true;
 
     const entries = ctx.sessionManager.getBranch();
     const conversationText = gatherFirstMessages(entries);
-    if (!conversationText.trim()) {
-      titling = false;
-      return;
-    }
+    if (!conversationText.trim()) return;
 
-    // Fire-and-forget: generate title in background without blocking next prompt
+    const token = lifecycleToken;
+    titling = true;
+
+    // Fire-and-forget: generate title in background without blocking next prompt.
+    // Drop results if the session/runtime was replaced while generation was in flight.
     void generateTitlePlain(conversationText, ctx.cwd)
       .then((title) => {
-        if (title) {
-          pi.setSessionName(title);
-          titled = true;
-        }
+        if (!title) return;
+        if (token !== lifecycleToken) return;
+
+        pi.setSessionName(title);
+        titled = true;
       })
       .catch((err) => {
         console.error("[title-generator]", err);
+        if (token !== lifecycleToken) return;
+
         try {
           ctx.ui?.notify?.(`Title generation failed: ${formatError(err)}`, "error");
         } catch {}
       })
       .finally(() => {
+        if (token !== lifecycleToken) return;
         titling = false;
       });
   });
