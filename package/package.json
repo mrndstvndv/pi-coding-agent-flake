@@ -3,6 +3,6 @@
   "private": true,
   "description": "Wrapper package for @earendil-works/pi-coding-agent",
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "0.77.0"
+    "@earendil-works/pi-coding-agent": "0.78.0"
   }
 }
