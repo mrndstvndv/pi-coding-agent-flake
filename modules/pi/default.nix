@@ -30,7 +30,7 @@ let
     {
       lsp.hookMode = "edit_write";
       defaultProvider = "opencode";
-      defaultModel = "minimax-m3-free";
+      defaultModel = "deepseek-v4-flash-free";
       defaultThinkingLevel = "xhigh";
       quietStartup = true;
     }
