@@ -63,6 +63,12 @@ in
   # Pure, generated settings.json - no symlinks, no mutable state
   home.file.".pi/agent/settings.json".text = builtins.toJSON piSettingsFinal;
 
+  # Keybindings
+  home.file.".pi/agent/keybindings.json".text = builtins.toJSON {
+    "app.thinking.cycle" = [ "ctrl+t" ];
+    "app.thinking.toggle" = [];
+  };
+
   # Custom provider model definitions
   home.file.".pi/agent/models.json".source = ./models.json;
 }
