@@ -32,6 +32,7 @@ let
       defaultProvider = "opencode";
       defaultModel = "deepseek-v4-flash-free";
       defaultThinkingLevel = "xhigh";
+      showCacheMissNotices = true;
       quietStartup = true;
     }
     // lib.optionalAttrs (piVersion != null) { lastChangelogVersion = piVersion; }
