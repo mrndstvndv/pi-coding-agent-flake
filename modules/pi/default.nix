@@ -32,6 +32,7 @@ let
       defaultProvider = "opencode";
       defaultModel = "deepseek-v4-flash-free";
       defaultThinkingLevel = "xhigh";
+      hideThinkingBlock = true;
       showCacheMissNotices = true;
       quietStartup = true;
     }
