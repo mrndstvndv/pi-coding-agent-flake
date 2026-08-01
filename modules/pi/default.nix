@@ -35,6 +35,7 @@ let
       hideThinkingBlock = true;
       showCacheMissNotices = true;
       quietStartup = true;
+      showHardwareCursor = true;
     }
     // lib.optionalAttrs (piVersion != null) { lastChangelogVersion = piVersion; }
     // {
