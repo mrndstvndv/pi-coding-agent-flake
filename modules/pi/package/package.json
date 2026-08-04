@@ -13,6 +13,7 @@
     "extensions": [
       "./extensions/kimi/kimi.ts",
       "./extensions/pi-notify.ts",
+      "./extensions/session-age.ts",
       "./extensions/file-command.ts",
       "./extensions/handoff.ts",
       "./extensions/web-fetch.ts",
