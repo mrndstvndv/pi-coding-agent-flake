@@ -36,6 +36,7 @@ let
       showCacheMissNotices = true;
       quietStartup = true;
       showHardwareCursor = true;
+      tuiMode = "fullscreen";
     }
     // lib.optionalAttrs (piVersion != null) { lastChangelogVersion = piVersion; }
     // {
