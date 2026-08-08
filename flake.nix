@@ -33,6 +33,8 @@
           installPhase = ''
             runHook preInstall
 
+            ${pkgs.nodejs_24}/bin/node patch-footer.mjs
+
             mkdir -p $out/bin $out/lib
             cp -r node_modules $out/lib/
             cp package.json package-lock.json $out/lib/
