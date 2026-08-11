@@ -74,4 +74,13 @@ in
 
   # Custom provider model definitions
   home.file.".pi/agent/models.json".source = ./models.json;
+
+  # settings.json must be writable: pi persists /setting changes there, but
+  # home.file deploys a read-only store symlink. Materialize a writable copy
+  # after writeBoundary. Declarative content wins on rebuild; hand edits
+  # survive until the next switch.
+  home.activation.makePiSettingsWritable = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+    $DRY_RUN_CMD install -m 0644 "$HOME/.pi/agent/settings.json" "$HOME/.pi/agent/.settings.json.tmp"
+    $DRY_RUN_CMD mv -f "$HOME/.pi/agent/.settings.json.tmp" "$HOME/.pi/agent/settings.json"
+  '';
 }
