@@ -12,6 +12,7 @@
     "extensions": [
       "./extensions/pi-notify.ts",
       "./extensions/session-age.ts",
+      "./extensions/session-title.ts",
       "./extensions/handoff.ts",
       "./extensions/web-fetch.ts",
       "./extensions/web-search.ts"
