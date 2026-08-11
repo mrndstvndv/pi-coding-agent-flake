@@ -63,9 +63,6 @@ in
   # Prompt templates - symlink to ~/.pi/agent/prompts/
   home.file.".pi/agent/prompts".source = ./prompt-templates;
 
-  # Pure, generated settings.json - no symlinks, no mutable state
-  home.file.".pi/agent/settings.json".text = builtins.toJSON piSettingsFinal;
-
   # Keybindings
   home.file.".pi/agent/keybindings.json".text = builtins.toJSON {
     "app.thinking.cycle" = [ "ctrl+t" ];
@@ -75,12 +72,14 @@ in
   # Custom provider model definitions
   home.file.".pi/agent/models.json".source = ./models.json;
 
-  # settings.json must be writable: pi persists /setting changes there, but
-  # home.file deploys a read-only store symlink. Materialize a writable copy
-  # after writeBoundary. Declarative content wins on rebuild; hand edits
-  # survive until the next switch.
+  # settings.json must stay writable (pi persists /setting changes there).
+  # It can't be a home.file: that deploys a read-only store symlink, and once
+  # materialized as a regular file, HM's checkLinkTargets collision check
+  # (with backupFileExtension set) hard-fails on every rebuild. Generate it
+  # purely in activation, outside HM's file management. Declarative content
+  # wins on rebuild; hand edits survive until the next switch.
   home.activation.makePiSettingsWritable = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-    $DRY_RUN_CMD install -m 0644 "$HOME/.pi/agent/settings.json" "$HOME/.pi/agent/.settings.json.tmp"
+    $DRY_RUN_CMD install -m 0644 "${pkgs.writeText "pi-settings.json" (builtins.toJSON piSettingsFinal)}" "$HOME/.pi/agent/.settings.json.tmp"
     $DRY_RUN_CMD mv -f "$HOME/.pi/agent/.settings.json.tmp" "$HOME/.pi/agent/settings.json"
   '';
 }
