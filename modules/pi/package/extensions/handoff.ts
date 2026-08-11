@@ -12,9 +12,13 @@
  * The generated prompt appears as a draft in the editor for review/editing.
  */
 
+import { spawn } from "node:child_process";
 import type { ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { BorderedLoader, convertToLlm, serializeConversation } from "@earendil-works/pi-coding-agent";
-import { createAcpPool, type AcpPool } from "./acp-client.js";
+
+const AGY_COMMAND = "agy";
+const AGY_PRINT_TIMEOUT = "5m";
+const MAX_ERROR_OUTPUT_LENGTH = 2000;
 
 const SYSTEM_PROMPT = `You are a context transfer assistant. Given a conversation history and the user's goal for a new thread, generate a focused prompt that:
 
@@ -23,7 +27,7 @@ const SYSTEM_PROMPT = `You are a context transfer assistant. Given a conversatio
 3. Clearly states the next task based on the user's goal
 4. Is self-contained - the new thread should be able to proceed without the old conversation
 
-Format your response as a prompt the user can send to start the new thread. Be concise but include all necessary context. Do not include any preamble like "Here's the prompt" - just output the prompt itself.
+Do not call tools or modify files. Format your response as a prompt the user can send to start the new thread. Be concise but include all necessary context. Do not include any preamble like "Here's the prompt" - just output the prompt itself.
 
 Example output format:
 ## Context
@@ -38,46 +42,10 @@ Files involved:
 ## Task
 [Clear description of what to do next based on user's goal]`;
 
-/** Global ACP pool - shared across all handoff calls for this pi instance */
-let acpPool: AcpPool | null = null;
-
-/** Map of auth method aliases to ACP protocol auth method IDs for Gemini */
-function getGeminiAuthMethod(hasApiKey: boolean): string {
-	return hasApiKey ? "gemini-api-key" : "oauth-personal";
-}
-
-/** Get or create the global ACP pool */
-function getAcpPool(cwd: string): AcpPool {
-	if (!acpPool) {
-		const hasApiKey = !!process.env.GEMINI_API_KEY;
-		acpPool = createAcpPool({
-			cwd,
-			command: "gemini",
-			// Prefer Flash at process startup. We'll also set the ACP session model when supported.
-			args: ["--model", HANDOFF_MODEL, "--acp"],
-			authMethod: getGeminiAuthMethod(hasApiKey),
-			env: {
-				GEMINI_CLI_DISABLE_SESSION_PERSISTENCE: "true",
-			},
-		});
-
-		process.on("beforeExit", () => {
-			acpPool?.shutdown().catch(() => {});
-		});
-	}
-	return acpPool;
-}
-
-const HANDOFF_MODEL = "gemini-3-flash-preview";
-
-function findModelConfigId(
-	configOptions: Array<{ id: string; category?: string | null }>
-): string | null {
-	const modelOption = configOptions.find((option) => option.category === "model");
-	if (modelOption) return modelOption.id;
-
-	const fallback = configOptions.find((option) => option.id === "model");
-	return fallback?.id ?? null;
+function truncateErrorOutput(output: string): string {
+	const trimmed = output.trim();
+	if (trimmed.length <= MAX_ERROR_OUTPUT_LENGTH) return trimmed;
+	return `${trimmed.slice(0, MAX_ERROR_OUTPUT_LENGTH)}...`;
 }
 
 function formatHandoffError(error: unknown): string {
@@ -85,18 +53,105 @@ function formatHandoffError(error: unknown): string {
 		return "Handoff failed. See logs for details.";
 	}
 
+	if (error.message === "Cancelled") return "Cancelled";
+
 	const message = error.message.toLowerCase();
-	if (message.includes("exhausted your daily quota")) {
-		return "Gemini quota exceeded for the current model. Try again later, switch models, or use a different API key.";
+	if (message.includes("spawn agy enoent")) {
+		return "Antigravity CLI not found. Install it and ensure `agy` is on PATH.";
 	}
-	if (message.includes("api key is missing")) {
-		return "Gemini API key not configured. Set GEMINI_API_KEY or run 'gemini auth login'.";
+	if (message.includes("authentication required") || message.includes("not authenticated")) {
+		return "Antigravity CLI is not authenticated. Run `agy` interactively once, then retry.";
 	}
-	if (message.includes("chat not initialized")) {
-		return "Gemini session failed to initialize. Try again or restart pi.";
+	if (message.includes("quota")) {
+		return "Antigravity quota exceeded. Try again later or select another model.";
 	}
 
-	return error.message;
+	return `Antigravity CLI failed: ${truncateErrorOutput(error.message)}`;
+}
+
+function runAgyPrompt(
+	prompt: string,
+	cwd: string,
+	signal: AbortSignal,
+	onOutput: (output: string) => void,
+): Promise<string> {
+	return new Promise((resolve, reject) => {
+		if (signal.aborted) {
+			reject(new Error("Cancelled"));
+			return;
+		}
+
+		const child = spawn(
+			AGY_COMMAND,
+			["--print", prompt, "--output-format", "text", "--print-timeout", AGY_PRINT_TIMEOUT],
+			{ cwd, stdio: ["ignore", "pipe", "pipe"] },
+		);
+		let output = "";
+		let diagnostics = "";
+		let aborted = false;
+		let settled = false;
+		let killTimeout: ReturnType<typeof setTimeout> | undefined;
+
+		const onAbort = () => {
+			aborted = true;
+			child.kill("SIGTERM");
+			killTimeout = setTimeout(() => {
+				if (!settled) child.kill("SIGKILL");
+			}, 5000);
+		};
+
+		const cleanup = () => {
+			signal.removeEventListener("abort", onAbort);
+			if (killTimeout) clearTimeout(killTimeout);
+		};
+
+		const finish = (callback: () => void) => {
+			if (settled) return;
+			settled = true;
+			cleanup();
+			callback();
+		};
+
+		child.stdout.on("data", (chunk: Buffer | string) => {
+			output += chunk.toString();
+			onOutput(output);
+		});
+
+		child.stderr.on("data", (chunk: Buffer | string) => {
+			diagnostics += chunk.toString();
+		});
+
+		child.once("error", (error) => {
+			finish(() => reject(aborted ? new Error("Cancelled") : error));
+		});
+
+		child.once("close", (code, signalName) => {
+			finish(() => {
+				if (aborted) {
+					reject(new Error("Cancelled"));
+					return;
+				}
+
+				if (code !== 0) {
+					const details = truncateErrorOutput(diagnostics);
+					const suffix = details ? `: ${details}` : "";
+					reject(new Error(`agy exited with ${code === null ? signalName ?? "an unknown status" : `code ${code}`}${suffix}`));
+					return;
+				}
+
+				const response = output.trim();
+				if (!response) {
+					reject(new Error("agy returned an empty response"));
+					return;
+				}
+
+				resolve(response);
+			});
+		});
+
+		signal.addEventListener("abort", onAbort, { once: true });
+		if (signal.aborted) onAbort();
+	});
 }
 
 /** Update loader message by accessing internal component */
@@ -135,80 +190,46 @@ export default function (pi: ExtensionAPI) {
 			const llmMessages = convertToLlm(messages);
 			const conversationText = serializeConversation(llmMessages);
 			const currentSessionFile = ctx.sessionManager.getSessionFile();
-			const pool = getAcpPool(ctx.sessionManager.cwd);
-
 			let lastError: string | null = null;
 
 			const result = await ctx.ui.custom<string | null>((tui, theme, _kb, done) => {
-				const initialMessage = pool.isFirstUse
-					? "Connecting to Gemini..."
-					: "Generating handoff prompt...";
-
-				const loader = new BorderedLoader(tui, theme, initialMessage);
-				loader.onAbort = () => done(null);
+				const loader = new BorderedLoader(tui, theme, "Generating handoff prompt with Antigravity...");
+				const abortController = new AbortController();
+				loader.onAbort = () => {
+					abortController.abort();
+					done(null);
+				};
 
 				const updateMessage = (msg: string) => {
 					updateLoaderMessage(loader, msg);
 					tui.requestRender();
 				};
 
-				const doGenerate = async () => {
+				const doGenerate = async (): Promise<string | null> => {
 					const combinedPrompt = `${SYSTEM_PROMPT}\n\n## Conversation History\n\n${conversationText}\n\n## User's Goal for New Thread\n\n${goal}`;
 
-					updateMessage("Creating session...");
-					const session = await pool.newSession();
+					updateMessage("Running Antigravity...");
+					const finalText = await runAgyPrompt(
+						combinedPrompt,
+						ctx.sessionManager.cwd,
+						abortController.signal,
+						(output) => {
+							const preview = output.slice(-150).replace(/\s+/g, " ").trim();
+							if (preview) updateMessage(preview);
+						},
+					);
 
-					if (loader.signal?.aborted) {
-						session.dispose();
-						return null;
-					}
-
-					try {
-						const modelConfigId = findModelConfigId(session.configOptions);
-						if (modelConfigId) {
-							const flashOption = session.configOptions
-								.find((option) => option.id === modelConfigId)
-								?.options.find((option) => option.value === HANDOFF_MODEL);
-
-							if (flashOption) {
-								updateMessage("Selecting model...");
-								await session.setConfigOption(modelConfigId, HANDOFF_MODEL);
-							}
-						}
-
-						updateMessage("Generating...");
-						
-						// Stream text chunks to update the loader in real-time
-						let streamedText = "";
-						const promptResult = await session.prompt(
-							[{ type: "text", text: combinedPrompt }],
-							(chunk) => {
-								streamedText = chunk;
-								// Show last ~150 chars for real-time feedback
-								const preview = chunk.slice(-150).replace(/\s+/g, " ").trim();
-								if (preview) updateMessage(preview);
-							}
-						);
-
-						if (promptResult.stopReason === "error") {
-							throw new Error("Generation failed - the model may be unavailable or quota exceeded");
-						}
-
-						const finalText = promptResult.text || streamedText;
-						if (!finalText?.trim()) {
-							throw new Error("Empty response from Gemini - session may need authentication");
-						}
-
-						return finalText;
-					} finally {
-						session.dispose();
-					}
+					if (abortController.signal.aborted) return null;
+					return finalText;
 				};
 
 				doGenerate()
-					.then(done)
-					.catch((err) => {
-						lastError = formatHandoffError(err);
+					.then((generatedPrompt) => {
+						if (!abortController.signal.aborted) done(generatedPrompt);
+					})
+					.catch((error: unknown) => {
+						if (abortController.signal.aborted) return;
+						lastError = formatHandoffError(error);
 						done(null);
 					});
 

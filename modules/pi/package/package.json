@@ -6,21 +6,15 @@
   "type": "module",
   "dependencies": {
     "@types/turndown": "^5.0.6",
-    "turndown": "^7.2.2",
-    "@pierre/diffs": "^1.2.12"
+    "turndown": "^7.2.2"
   },
   "pi": {
     "extensions": [
-      "./extensions/kimi/kimi.ts",
       "./extensions/pi-notify.ts",
       "./extensions/session-age.ts",
-      "./extensions/file-command.ts",
       "./extensions/handoff.ts",
       "./extensions/web-fetch.ts",
-      "./extensions/web-search.ts",
-      "./extensions/mdview.ts",
-      "./extensions/welcome.ts",
-      "./extensions/diff-host.ts"
+      "./extensions/web-search.ts"
     ]
   }
 }
