@@ -20,9 +20,9 @@ Rules:
 - Capture the user's main task, not implementation details.
 - Do not call tools or modify files.
 
-<user_request>
-{{USER_REQUEST}}
-</user_request>`;
+<conversation>
+{{CONVERSATION_CONTEXT}}
+</conversation>`;
 
 type TitleContext = Pick<ExtensionContext, "cwd" | "hasUI" | "sessionManager" | "ui">;
 
@@ -44,20 +44,27 @@ function extractText(content: unknown): string {
 	return parts.join("\n").trim();
 }
 
-function getInitialUserRequest(entries: SessionEntry[]): string | null {
-	for (const entry of entries) {
-		if (entry.type !== "message" || entry.message.role !== "user") continue;
+function buildConversationContext(entries: SessionEntry[]): string | null {
+	const sections: string[] = [];
 
-		const request = extractText(entry.message.content);
-		if (request) return request;
+	for (const entry of entries) {
+		if (entry.type !== "message") continue;
+		if (entry.message.role !== "user" && entry.message.role !== "assistant") continue;
+
+		const text = extractText(entry.message.content);
+		if (!text) continue;
+
+		const role = entry.message.role === "user" ? "User" : "Assistant";
+		sections.push(`${role}: ${text}`);
 	}
 
-	return null;
+	const context = sections.join("\n\n").trim();
+	return context || null;
 }
 
-function buildTitlePrompt(userRequest: string): string {
-	const source = userRequest.slice(0, MAX_SOURCE_LENGTH);
-	return TITLE_PROMPT.replace("{{USER_REQUEST}}", source);
+function buildTitlePrompt(conversationContext: string): string {
+	const source = conversationContext.slice(0, MAX_SOURCE_LENGTH);
+	return TITLE_PROMPT.replace("{{CONVERSATION_CONTEXT}}", source);
 }
 
 function formatCommandError(result: { code: number; stderr: string; killed: boolean }): string {
@@ -65,32 +72,6 @@ function formatCommandError(result: { code: number; stderr: string; killed: bool
 	if (diagnostics) return diagnostics;
 	if (result.killed) return "agy was terminated before returning a title";
 	return `agy exited with code ${result.code}`;
-}
-
-function parseTitleResponse(output: string): string {
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(output);
-	} catch {
-		throw new Error("agy returned invalid JSON");
-	}
-
-	if (!isRecord(parsed)) {
-		throw new Error("agy returned an invalid response");
-	}
-
-	if (parsed.status !== "SUCCESS") {
-		const error = typeof parsed.error === "string" ? parsed.error : "unknown error";
-		throw new Error(error);
-	}
-
-	const structuredOutput = parsed.structured_output;
-	if (typeof structuredOutput === "string") return structuredOutput;
-
-	const response = parsed.response;
-	if (typeof response === "string") return response;
-
-	throw new Error("agy returned no title");
 }
 
 function normalizeTitle(value: string): string {
@@ -123,18 +104,16 @@ function formatError(error: unknown): string {
 }
 
 async function generateTitle(pi: ExtensionAPI, ctx: TitleContext): Promise<string> {
-	const userRequest = getInitialUserRequest(ctx.sessionManager.getBranch());
-	if (!userRequest) throw new Error("no user request found in this session");
+	const conversationContext = buildConversationContext(ctx.sessionManager.getBranch());
+	if (!conversationContext) throw new Error("no user or assistant messages found in this session");
 
 	const result = await pi.exec(
 		AGY_COMMAND,
 		[
 			"--print",
-			buildTitlePrompt(userRequest),
+			buildTitlePrompt(conversationContext),
 			"--output-format",
-			"json",
-			"--json-schema",
-			"string",
+			"text",
 			"--print-timeout",
 			AGY_PRINT_TIMEOUT,
 		],
@@ -145,7 +124,7 @@ async function generateTitle(pi: ExtensionAPI, ctx: TitleContext): Promise<strin
 		throw new Error(formatCommandError(result));
 	}
 
-	return normalizeTitle(parseTitleResponse(result.stdout));
+	return normalizeTitle(result.stdout);
 }
 
 export default function sessionTitleExtension(pi: ExtensionAPI): void {
