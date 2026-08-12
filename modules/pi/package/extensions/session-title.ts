@@ -137,6 +137,9 @@ export default function sessionTitleExtension(pi: ExtensionAPI): void {
 	});
 
 	async function setTitle(ctx: TitleContext, notifyOnFailure: boolean): Promise<void> {
+		if (ctx.hasUI) {
+			ctx.ui.setStatus("title", "Generating session title…");
+		}
 		try {
 			const title = await generateTitle(pi, ctx);
 			pi.setSessionName(title);
@@ -150,19 +153,23 @@ export default function sessionTitleExtension(pi: ExtensionAPI): void {
 				return;
 			}
 			console.error(`[session-title] ${message}`);
+		} finally {
+			if (ctx.hasUI) {
+				ctx.ui.setStatus("title", undefined);
+			}
 		}
 	}
 
-	pi.on("agent_settled", async (_event, ctx) => {
+	pi.on("agent_settled", (_event, ctx) => {
 		if (automaticAttempted || generationInFlight || pi.getSessionName()) return;
 
 		automaticAttempted = true;
 		generationInFlight = true;
-		try {
-			await setTitle(ctx, false);
-		} finally {
+		// Fire-and-forget: awaiting agy (up to 90s) inside an agent_settled handler
+		// would keep the session from settling, blocking new prompts until it returns.
+		void setTitle(ctx, false).finally(() => {
 			generationInFlight = false;
-		}
+		});
 	});
 
 	pi.registerCommand("title", {
