@@ -40,7 +40,7 @@ let
     // lib.optionalAttrs (piVersion != null) { lastChangelogVersion = piVersion; }
     // {
       packages =
-        [ "${piExtensions}" "../personal" "npm:@ff-labs/pi-fff" ];
+        [ "${piExtensions}" "../personal" "../fff" ];
       theme = "terminal";
       themes = [ "~/.pi/agent/themes" ];
     };
