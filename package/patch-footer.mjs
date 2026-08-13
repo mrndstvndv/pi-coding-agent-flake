@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * Patches the pi-built footer so extension statuses (ctx.ui.setStatus) render
- * right-aligned on the first footer line (pwd/git branch) instead of on a
- * separate line below the stats. Fails loudly if the expected source block
- * changed upstream, so a pi version bump surfaces here instead of silently
- * breaking the layout.
+ * Patches the pi-built footer so it shows only the cwd basename and extension
+ * statuses (ctx.ui.setStatus) render right-aligned on the first footer line
+ * instead of on a separate line below the stats. Fails loudly if the expected
+ * source block changed upstream, so a pi version bump surfaces here instead of
+ * silently breaking the layout.
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -39,7 +39,9 @@ const MARKER = `        const pwdLine = truncateToWidth(theme.fg("dim", pwd), wi
 
 const REPLACEMENT = `        // Patched by pi-coding-agent-flake: statuses render right-aligned on the pwd line.
         const pwdLine = (() => {
-            const pwdStyled = theme.fg("dim", pwd);
+            const trimmedPwd = pwd.replace(/[\\/]+$/, "");
+            const shortPwd = trimmedPwd.split(/[\\/]/).at(-1) || pwd;
+            const pwdStyled = theme.fg("dim", shortPwd);
             const extensionStatuses = this.footerData.getExtensionStatuses();
             if (extensionStatuses.size === 0) {
                 return truncateToWidth(pwdStyled, width, theme.fg("dim", "..."));
