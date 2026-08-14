@@ -59,8 +59,7 @@ const REPLACEMENT = `        // Patched by pi-coding-agent-flake: statuses rende
             const gap = Math.max(2, width - visibleWidth(pwdTruncated) - statusTextWidth);
             return pwdTruncated + " ".repeat(gap) + statusText;
         })();
-        const lines = [pwdLine, dimStatsLeft + dimRemainder];
-        return lines;`;
+        return [pwdLine];`;
 
 const source = readFileSync(footerPath, "utf-8");
 if (!source.includes(MARKER)) {
