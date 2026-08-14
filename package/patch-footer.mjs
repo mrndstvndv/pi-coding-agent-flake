@@ -59,13 +59,19 @@ const REPLACEMENT = `        // Patched by pi-coding-agent-flake: statuses rende
             const gap = Math.max(2, width - visibleWidth(pwdTruncated) - statusTextWidth);
             return pwdTruncated + " ".repeat(gap) + statusText;
         })();
-        return [pwdLine];`;
+        return [pwdLine, dimStatsLeft + dimRemainder];`;
 
 const source = readFileSync(footerPath, "utf-8");
+const filteredSource = source.replace(
+  "        let statsLeft = statsParts.join(\" \");",
+  `        let statsLeft = statsParts
+            .filter((part) => !/^(↑|↓|R|W|CH)/.test(part))
+            .join(" ");`,
+);
 if (!source.includes(MARKER)) {
   console.error(`patch-footer.mjs: footer marker not found in ${footerPath}`);
   console.error("Upstream footer.js changed — update the MARKER in package/patch-footer.mjs.");
   process.exit(1);
 }
-writeFileSync(footerPath, source.replace(MARKER, REPLACEMENT));
+writeFileSync(footerPath, filteredSource.replace(MARKER, REPLACEMENT));
 console.log(`patch-footer.mjs: patched ${footerPath}`);
