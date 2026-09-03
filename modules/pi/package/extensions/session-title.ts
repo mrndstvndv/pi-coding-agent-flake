@@ -3,8 +3,12 @@ import type {
 	ExtensionContext,
 	SessionEntry,
 } from "@earendil-works/pi-coding-agent";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 
 const AGY_COMMAND = "agy";
+const AGY_MODEL = "gpt-oss-120b-medium";
 const AGY_TIMEOUT_MS = 90_000;
 const AGY_PRINT_TIMEOUT = "90s";
 const MAX_SOURCE_LENGTH = 20_000;
@@ -99,32 +103,194 @@ function formatError(error: unknown): string {
 	if (message.includes("authentication required") || message.includes("not authenticated")) {
 		return "Antigravity CLI is not authenticated; run `agy` interactively once";
 	}
+	if (message.includes("quota")) {
+		return "Antigravity quota exceeded; try again later";
+	}
 
 	return error.message;
+}
+
+function agyDir(): string {
+	return path.join(os.homedir(), ".gemini", "antigravity-cli");
+}
+
+interface PointerState {
+	cwds: string[];
+	prevValues: Map<string, unknown>;
+}
+
+function readPointerState(cwd: string): PointerState {
+	const cwds = [cwd];
+	try {
+		const real = fs.realpathSync(cwd);
+		if (real !== cwd) cwds.push(real);
+	} catch {
+		// cwd may not exist or cannot be resolved, fallback to ctx.cwd
+	}
+
+	const prevValues = new Map<string, unknown>();
+	try {
+		const ptrFile = path.join(agyDir(), "cache", "last_conversations.json");
+		if (fs.existsSync(ptrFile)) {
+			const parsed: unknown = JSON.parse(fs.readFileSync(ptrFile, "utf8"));
+			if (isRecord(parsed)) {
+				for (const c of cwds) {
+					if (c in parsed) {
+						prevValues.set(c, parsed[c]);
+					}
+				}
+			}
+		}
+	} catch (error) {
+		console.warn(`[session-title] failed to read continue pointer: ${error instanceof Error ? error.message : String(error)}`);
+	}
+
+	return { cwds, prevValues };
+}
+
+function restorePointerState(state: PointerState, conversationId?: string): void {
+	try {
+		const cacheDir = path.join(agyDir(), "cache");
+		const ptrFile = path.join(cacheDir, "last_conversations.json");
+		if (!fs.existsSync(ptrFile)) return;
+
+		const parsed: unknown = JSON.parse(fs.readFileSync(ptrFile, "utf8"));
+		if (!isRecord(parsed)) return;
+
+		let changed = false;
+		for (const cwd of state.cwds) {
+			const currentVal = parsed[cwd];
+			// Only restore if this run set the pointer, or if no conversationId was known
+			if (conversationId && currentVal !== conversationId) continue;
+
+			if (state.prevValues.has(cwd)) {
+				const prev = state.prevValues.get(cwd);
+				if (parsed[cwd] !== prev) {
+					parsed[cwd] = prev;
+					changed = true;
+				}
+			} else if (cwd in parsed) {
+				delete parsed[cwd];
+				changed = true;
+			}
+		}
+
+		if (changed) {
+			const tmp = path.join(
+				cacheDir,
+				`last_conversations.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`,
+			);
+			fs.writeFileSync(tmp, `${JSON.stringify(parsed, null, 2)}\n`);
+			fs.renameSync(tmp, ptrFile);
+		}
+	} catch (error) {
+		console.warn(`[session-title] failed to restore continue pointer: ${error instanceof Error ? error.message : String(error)}`);
+	}
+}
+
+// Clean up the per-conversation ephemeral files created on disk for this run.
+function cleanupAgyConversation(conversationId: string): void {
+	if (!/^[0-9a-fA-F-]{8,64}$/.test(conversationId)) return;
+	const base = agyDir();
+	const rm = (rel: string) => {
+		try {
+			fs.rmSync(path.join(base, rel), { recursive: true, force: true });
+		} catch (error) {
+			console.warn(`[session-title] failed to clean up ephemeral file ${rel}: ${error instanceof Error ? error.message : String(error)}`);
+		}
+	};
+
+	rm(`conversations/${conversationId}.db`);
+	rm(`conversations/${conversationId}.db-wal`);
+	rm(`conversations/${conversationId}.db-shm`);
+	rm(`brain/${conversationId}`);
+	rm(`presence/${conversationId}.lock`);
+	rm(`annotations/${conversationId}.pbtxt`);
+}
+
+interface ParsedAgyOutput {
+	response?: string;
+	conversationId?: string;
+	parseError?: Error;
+}
+
+function parseAgyJsonOutput(stdout: string): ParsedAgyOutput {
+	let parsed: unknown;
+	let parseError: Error | undefined;
+	const trimmed = stdout.trim();
+	try {
+		parsed = JSON.parse(trimmed);
+	} catch (error) {
+		parseError = error instanceof Error ? error : new Error(String(error));
+		// Fallback: extract JSON object substring if agy printed surrounding output/warnings
+		const match = trimmed.match(/\{[\s\S]*\}/);
+		if (match) {
+			try {
+				parsed = JSON.parse(match[0]);
+				parseError = undefined;
+			} catch (subError) {
+				parseError = subError instanceof Error ? subError : new Error(String(subError));
+				return { parseError };
+			}
+		} else {
+			return { parseError };
+		}
+	}
+
+	if (!isRecord(parsed)) return { parseError: parseError ?? new Error("output is not a JSON object") };
+
+	const conversationId =
+		typeof parsed.conversation_id === "string" && /^[0-9a-fA-F-]{8,64}$/.test(parsed.conversation_id)
+			? parsed.conversation_id
+			: undefined;
+	const response = typeof parsed.response === "string" ? parsed.response : undefined;
+
+	return { response, conversationId };
 }
 
 async function generateTitle(pi: ExtensionAPI, ctx: TitleContext): Promise<string> {
 	const conversationContext = buildConversationContext(ctx.sessionManager.getBranch());
 	if (!conversationContext) throw new Error("no user or assistant messages found in this session");
 
-	const result = await pi.exec(
-		AGY_COMMAND,
-		[
-			"--print",
-			buildTitlePrompt(conversationContext),
-			"--output-format",
-			"text",
-			"--print-timeout",
-			AGY_PRINT_TIMEOUT,
-		],
-		{ cwd: ctx.cwd, timeout: AGY_TIMEOUT_MS },
-	);
+	const pointerState = readPointerState(ctx.cwd);
+	let conversationId: string | undefined;
 
-	if (result.code !== 0) {
-		throw new Error(formatCommandError(result));
+	try {
+		const result = await pi.exec(
+			AGY_COMMAND,
+			[
+				"--model",
+				AGY_MODEL,
+				"--print",
+				buildTitlePrompt(conversationContext),
+				"--output-format",
+				"json",
+				"--print-timeout",
+				AGY_PRINT_TIMEOUT,
+			],
+			{ cwd: ctx.cwd, timeout: AGY_TIMEOUT_MS },
+		);
+
+		const parsed = parseAgyJsonOutput(result.stdout);
+		conversationId = parsed.conversationId;
+
+		if (result.code !== 0) {
+			throw new Error(formatCommandError(result));
+		}
+
+		if (!parsed.response) {
+			const reason = parsed.parseError ? ` (${parsed.parseError.message})` : "";
+			const snippet = result.stdout.trim().slice(0, 200);
+			throw new Error(snippet ? `agy returned unexpected JSON${reason}: ${snippet}` : "agy returned an empty response");
+		}
+
+		return normalizeTitle(parsed.response);
+	} finally {
+		if (conversationId) {
+			cleanupAgyConversation(conversationId);
+		}
+		restorePointerState(pointerState, conversationId);
 	}
-
-	return normalizeTitle(result.stdout);
 }
 
 export default function sessionTitleExtension(pi: ExtensionAPI): void {
@@ -149,7 +315,7 @@ export default function sessionTitleExtension(pi: ExtensionAPI): void {
 		} catch (error) {
 			const message = formatError(error);
 			if (notifyOnFailure && ctx.hasUI) {
-				ctx.ui.notify(`Title generation failed: ${message}`, "warning");
+				ctx.ui.notify(`Title generation failed: ${message}`, "error");
 				return;
 			}
 			console.error(`[session-title] ${message}`);
