@@ -29,8 +29,8 @@ let
   piSettingsFinal =
     {
       lsp.hookMode = "edit_write";
-      defaultProvider = "opencode";
-      defaultModel = "deepseek-v4-flash-free";
+      defaultProvider = "openai-codex";
+      defaultModel = "gpt-5.6-luna";
       defaultThinkingLevel = "xhigh";
       # Scope the model picker (Ctrl+P / /scoped-models) to a curated subset.
       # Glob patterns match "provider/modelId" or a bare modelId.
@@ -51,6 +51,11 @@ let
         [ "${piExtensions}" "../personal" ];
       theme = "terminal";
       themes = [ "~/.pi/agent/themes" ];
+      modelThinkingLevels = {
+        "openai-codex/gpt-5.6-luna" = "max";
+        "github-copilot/gpt-5.6-luna" = "max";
+        "openai-codex/gpt-5.6-sol" = "high";
+      };
     };
 in
 {
