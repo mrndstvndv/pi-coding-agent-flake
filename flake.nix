@@ -40,7 +40,7 @@
             cp package.json package-lock.json $out/lib/
 
             makeWrapper ${pkgs.nodejs_24}/bin/node $out/bin/pi \
-              --add-flags "$out/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js" \
+              --add-flags "$out/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js" \
               --set-default PI_PACKAGE_DIR "$out/lib/node_modules/@earendil-works/pi-coding-agent"
 
             runHook postInstall
