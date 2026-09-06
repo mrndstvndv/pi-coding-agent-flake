@@ -1166,8 +1166,9 @@ async function applySingleHunk(
 		const nextContent = chunkResult.content;
 
 		if (hunk.movePath && absoluteMovePath) {
+			const sourceMode = (await stat(absolutePath)).mode & 0o7777;
 			await mkdir(path.dirname(absoluteMovePath), { recursive: true });
-			await writeFileAtomic(absoluteMovePath, nextContent);
+			await writeFileAtomic(absoluteMovePath, nextContent, undefined, sourceMode);
 			if (absoluteMovePath !== absolutePath) {
 				await rm(absolutePath);
 			}
