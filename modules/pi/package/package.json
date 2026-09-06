@@ -6,10 +6,13 @@
   "type": "module",
   "dependencies": {
     "@types/turndown": "^5.0.6",
+    "diff": "^9.0.0",
+    "typebox": "1.3.7",
     "turndown": "^7.2.2"
   },
   "pi": {
     "extensions": [
+      "./extensions/apply-patch/src/index.ts",
       "./extensions/pi-notify.ts",
       "./extensions/session-age.ts",
       "./extensions/session-title.ts",
