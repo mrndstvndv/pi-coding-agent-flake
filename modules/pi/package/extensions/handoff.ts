@@ -13,6 +13,9 @@
  */
 
 import { spawn } from "node:child_process";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { BorderedLoader, convertToLlm, serializeConversation } from "@earendil-works/pi-coding-agent";
 
@@ -47,6 +50,10 @@ Files involved:
 ## Task
 [Clear description based on the user's handoff directive]`;
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null;
+}
+
 function truncateErrorOutput(output: string): string {
 	const trimmed = output.trim();
 	if (trimmed.length <= MAX_ERROR_OUTPUT_LENGTH) return trimmed;
@@ -74,17 +81,84 @@ function formatHandoffError(error: unknown): string {
 	return `Antigravity CLI failed: ${truncateErrorOutput(error.message)}`;
 }
 
+function agyDir(): string {
+	return path.join(os.homedir(), ".gemini", "antigravity-cli");
+}
+
+// Clean up the per-conversation ephemeral files created on disk for this run.
+function cleanupAgyConversation(conversationId: string): void {
+	if (!/^[0-9a-fA-F-]{8,64}$/.test(conversationId)) return;
+	const base = agyDir();
+	const rm = (rel: string) => {
+		try {
+			fs.rmSync(path.join(base, rel), { recursive: true, force: true });
+		} catch (error) {
+			console.warn(`[handoff] failed to clean up ephemeral file ${rel}: ${error instanceof Error ? error.message : String(error)}`);
+		}
+	};
+
+	rm(`conversations/${conversationId}.db`);
+	rm(`conversations/${conversationId}.db-wal`);
+	rm(`conversations/${conversationId}.db-shm`);
+	rm(`brain/${conversationId}`);
+	rm(`presence/${conversationId}.lock`);
+	rm(`annotations/${conversationId}.pbtxt`);
+}
+
+interface ParsedAgyOutput {
+	response?: string;
+	conversationId?: string;
+	error?: string;
+	parseError?: Error;
+}
+
+function parseAgyJsonOutput(stdout: string): ParsedAgyOutput {
+	let parsed: unknown;
+	let parseError: Error | undefined;
+	const trimmed = stdout.trim();
+	try {
+		parsed = JSON.parse(trimmed);
+	} catch (error) {
+		parseError = error instanceof Error ? error : new Error(String(error));
+		// Fallback: extract JSON object substring if agy printed surrounding output/warnings
+		const match = trimmed.match(/\{[\s\S]*\}/);
+		if (match) {
+			try {
+				parsed = JSON.parse(match[0]);
+				parseError = undefined;
+			} catch (subError) {
+				parseError = subError instanceof Error ? subError : new Error(String(subError));
+				return { parseError };
+			}
+		} else {
+			return { parseError };
+		}
+	}
+
+	if (!isRecord(parsed)) return { parseError: parseError ?? new Error("output is not a JSON object") };
+
+	const conversationId =
+		typeof parsed.conversation_id === "string" && /^[0-9a-fA-F-]{8,64}$/.test(parsed.conversation_id)
+			? parsed.conversation_id
+			: undefined;
+	const response = typeof parsed.response === "string" ? parsed.response : undefined;
+	const err = typeof parsed.error === "string" ? parsed.error : undefined;
+
+	return { response, conversationId, error: err };
+}
+
 function runAgyPrompt(
 	prompt: string,
-	cwd: string,
 	signal: AbortSignal,
-	onOutput: (output: string) => void,
+	onOutput?: (output: string) => void,
 ): Promise<string> {
 	return new Promise((resolve, reject) => {
 		if (signal.aborted) {
 			reject(new Error("Cancelled"));
 			return;
 		}
+
+		let conversationId: string | undefined;
 
 		const child = spawn(
 			AGY_COMMAND,
@@ -96,11 +170,11 @@ function runAgyPrompt(
 				"--print",
 				prompt,
 				"--output-format",
-				"text",
+				"json",
 				"--print-timeout",
 				AGY_PRINT_TIMEOUT,
 			],
-			{ cwd, stdio: ["ignore", "pipe", "pipe"] },
+			{ cwd: os.tmpdir(), stdio: ["ignore", "pipe", "pipe"] },
 		);
 		let output = "";
 		let diagnostics = "";
@@ -116,7 +190,7 @@ function runAgyPrompt(
 			}, 5000);
 		};
 
-		const cleanup = () => {
+		const cleanupProcess = () => {
 			signal.removeEventListener("abort", onAbort);
 			if (killTimeout) clearTimeout(killTimeout);
 		};
@@ -124,13 +198,18 @@ function runAgyPrompt(
 		const finish = (callback: () => void) => {
 			if (settled) return;
 			settled = true;
-			cleanup();
+			cleanupProcess();
+			if (conversationId) {
+				cleanupAgyConversation(conversationId);
+			}
 			callback();
 		};
 
 		child.stdout.on("data", (chunk: Buffer | string) => {
 			output += chunk.toString();
-			onOutput(output);
+			if (onOutput) {
+				onOutput(output);
+			}
 		});
 
 		child.stderr.on("data", (chunk: Buffer | string) => {
@@ -142,6 +221,9 @@ function runAgyPrompt(
 		});
 
 		child.once("close", (code, signalName) => {
+			const parsed = parseAgyJsonOutput(output);
+			conversationId = parsed.conversationId;
+
 			finish(() => {
 				if (aborted) {
 					reject(new Error("Cancelled"));
@@ -149,19 +231,24 @@ function runAgyPrompt(
 				}
 
 				if (code !== 0) {
-					const details = truncateErrorOutput(diagnostics);
+					const details = truncateErrorOutput(diagnostics || parsed.error || "");
 					const suffix = details ? `: ${details}` : "";
 					reject(new Error(`agy exited with ${code === null ? signalName ?? "an unknown status" : `code ${code}`}${suffix}`));
 					return;
 				}
 
-				const response = output.trim();
-				if (!response) {
-					reject(new Error("agy returned an empty response"));
+				if (!parsed.response) {
+					if (parsed.error) {
+						reject(new Error(parsed.error));
+						return;
+					}
+					const reason = parsed.parseError ? ` (${parsed.parseError.message})` : "";
+					const snippet = output.trim().slice(0, 200);
+					reject(new Error(snippet ? `agy returned unexpected JSON${reason}: ${snippet}` : "agy returned an empty response"));
 					return;
 				}
 
-				resolve(response);
+				resolve(parsed.response.trim());
 			});
 		});
 
@@ -243,11 +330,9 @@ Use the handoff directive above as the authoritative task. Follow its requested 
 					updateMessage("Running Antigravity...");
 					const finalText = await runAgyPrompt(
 						combinedPrompt,
-						ctx.sessionManager.cwd,
 						abortController.signal,
-						(output) => {
-							const preview = output.slice(-150).replace(/\s+/g, " ").trim();
-							if (preview) updateMessage(preview);
+						() => {
+							updateMessage("Finalizing handoff prompt...");
 						},
 					);
 

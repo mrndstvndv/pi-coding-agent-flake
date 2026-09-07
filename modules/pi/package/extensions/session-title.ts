@@ -114,80 +114,6 @@ function agyDir(): string {
 	return path.join(os.homedir(), ".gemini", "antigravity-cli");
 }
 
-interface PointerState {
-	cwds: string[];
-	prevValues: Map<string, unknown>;
-}
-
-function readPointerState(cwd: string): PointerState {
-	const cwds = [cwd];
-	try {
-		const real = fs.realpathSync(cwd);
-		if (real !== cwd) cwds.push(real);
-	} catch {
-		// cwd may not exist or cannot be resolved, fallback to ctx.cwd
-	}
-
-	const prevValues = new Map<string, unknown>();
-	try {
-		const ptrFile = path.join(agyDir(), "cache", "last_conversations.json");
-		if (fs.existsSync(ptrFile)) {
-			const parsed: unknown = JSON.parse(fs.readFileSync(ptrFile, "utf8"));
-			if (isRecord(parsed)) {
-				for (const c of cwds) {
-					if (c in parsed) {
-						prevValues.set(c, parsed[c]);
-					}
-				}
-			}
-		}
-	} catch (error) {
-		console.warn(`[session-title] failed to read continue pointer: ${error instanceof Error ? error.message : String(error)}`);
-	}
-
-	return { cwds, prevValues };
-}
-
-function restorePointerState(state: PointerState, conversationId?: string): void {
-	try {
-		const cacheDir = path.join(agyDir(), "cache");
-		const ptrFile = path.join(cacheDir, "last_conversations.json");
-		if (!fs.existsSync(ptrFile)) return;
-
-		const parsed: unknown = JSON.parse(fs.readFileSync(ptrFile, "utf8"));
-		if (!isRecord(parsed)) return;
-
-		let changed = false;
-		for (const cwd of state.cwds) {
-			const currentVal = parsed[cwd];
-			// Only restore if this run set the pointer, or if no conversationId was known
-			if (conversationId && currentVal !== conversationId) continue;
-
-			if (state.prevValues.has(cwd)) {
-				const prev = state.prevValues.get(cwd);
-				if (parsed[cwd] !== prev) {
-					parsed[cwd] = prev;
-					changed = true;
-				}
-			} else if (cwd in parsed) {
-				delete parsed[cwd];
-				changed = true;
-			}
-		}
-
-		if (changed) {
-			const tmp = path.join(
-				cacheDir,
-				`last_conversations.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`,
-			);
-			fs.writeFileSync(tmp, `${JSON.stringify(parsed, null, 2)}\n`);
-			fs.renameSync(tmp, ptrFile);
-		}
-	} catch (error) {
-		console.warn(`[session-title] failed to restore continue pointer: ${error instanceof Error ? error.message : String(error)}`);
-	}
-}
-
 // Clean up the per-conversation ephemeral files created on disk for this run.
 function cleanupAgyConversation(conversationId: string): void {
 	if (!/^[0-9a-fA-F-]{8,64}$/.test(conversationId)) return;
@@ -252,7 +178,6 @@ async function generateTitle(pi: ExtensionAPI, ctx: TitleContext): Promise<strin
 	const conversationContext = buildConversationContext(ctx.sessionManager.getBranch());
 	if (!conversationContext) throw new Error("no user or assistant messages found in this session");
 
-	const pointerState = readPointerState(ctx.cwd);
 	let conversationId: string | undefined;
 
 	try {
@@ -268,7 +193,7 @@ async function generateTitle(pi: ExtensionAPI, ctx: TitleContext): Promise<strin
 				"--print-timeout",
 				AGY_PRINT_TIMEOUT,
 			],
-			{ cwd: ctx.cwd, timeout: AGY_TIMEOUT_MS },
+			{ cwd: os.tmpdir(), timeout: AGY_TIMEOUT_MS },
 		);
 
 		const parsed = parseAgyJsonOutput(result.stdout);
@@ -289,7 +214,6 @@ async function generateTitle(pi: ExtensionAPI, ctx: TitleContext): Promise<strin
 		if (conversationId) {
 			cleanupAgyConversation(conversationId);
 		}
-		restorePointerState(pointerState, conversationId);
 	}
 }
 
