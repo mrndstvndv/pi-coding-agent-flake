@@ -35,7 +35,7 @@ let
       # Scope the model picker (Ctrl+P / /scoped-models) to a curated subset.
       # Glob patterns match "provider/modelId" or a bare modelId.
       enabledModels = [
-        "opencode/*-free"                     # all free opencode models
+        "opencode/*"                     # all free opencode models
         "openai-codex/gpt-5.6-luna"          # luna (codex)
         "github-copilot/gpt-5.6-luna"        # luna (copilot)
         "openai-codex/gpt-5.6-sol"           # sol
