@@ -1345,28 +1345,12 @@ function replaceApplyPatchWithEditTools(toolNames: string[]): string[] {
 
 function resolvePatchPath(cwd: string, filePath: string): string {
 	const normalizedPath = filePath.replaceAll("\\\\", "/").trim();
-	const workspaceRoot = path.resolve(cwd);
 
-	if (
-		normalizedPath.length === 0 ||
-		normalizedPath.includes("\0") ||
-		normalizedPath.startsWith("/") ||
-		/^[A-Za-z]:\//.test(normalizedPath)
-	) {
-		throw new PatchApplicationError(`Patch path must be workspace-relative: ${filePath}`);
+	if (normalizedPath.length === 0 || normalizedPath.includes("\0")) {
+		throw new PatchApplicationError(`Invalid patch path: ${filePath}`);
 	}
 
-	const absolutePath = path.resolve(workspaceRoot, normalizedPath);
-	const relativePath = path.relative(workspaceRoot, absolutePath);
-	if (
-		relativePath === ".." ||
-		relativePath.startsWith(`..${path.sep}`) ||
-		path.isAbsolute(relativePath)
-	) {
-		throw new PatchApplicationError(`Patch path escapes workspace: ${filePath}`);
-	}
-
-	return absolutePath;
+	return path.resolve(cwd, normalizedPath);
 }
 
 async function canonicalMutationPath(filePath: string): Promise<string> {
