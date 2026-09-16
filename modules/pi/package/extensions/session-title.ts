@@ -8,7 +8,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 const AGY_COMMAND = "agy";
-const AGY_MODEL = "gpt-oss-120b-medium";
+const AGY_MODEL = "gemini-3.6-flash-low";
 const AGY_TIMEOUT_MS = 90_000;
 const AGY_PRINT_TIMEOUT = "90s";
 const MAX_SOURCE_LENGTH = 20_000;

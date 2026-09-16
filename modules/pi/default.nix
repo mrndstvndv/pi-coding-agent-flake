@@ -40,6 +40,7 @@ let
         "github-copilot/gpt-5.6-luna"        # luna (copilot)
         "openai-codex/gpt-5.6-sol"           # sol
         "deepseek/deepseek-flash"
+        "openrouter/stealth/union-alpha"     # Union Alpha
       ];
       hideThinkingBlock = true;
       showCacheMissNotices = true;
