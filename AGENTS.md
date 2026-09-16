@@ -18,7 +18,6 @@ Nix flake packaging [pi](https://github.com/earendil-works/pi-mono) coding agent
 │   │       ├── lsp/                   # LSP integration
 │   │       ├── pi-rewind/             # Session rewind
 │   │       ├── web-fetch.ts           # Web fetch tool
-│   │       ├── web-search.ts          # Web search tool
 │   │       └── ...                    # Other extensions
 │   ├── skills/                        # Custom skills (SKILL.md discovery)
 │   │   ├── nyaa/
@@ -129,7 +128,7 @@ Options:
 Extension notes:
 - Resources are registered in `package/package.json` under the `pi` key.
 - Local extension entrypoints should stay relative to the package root, e.g. `./extensions/web-fetch.ts`.
-- The module already uses this package for custom tooling like web fetch/search, LSP, notifications, and handoff helpers.
+- The module already uses this package for custom tooling like web fetch, LSP, notifications, and handoff helpers.
 
 ## Less obvious pi features
 

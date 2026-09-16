@@ -3,7 +3,6 @@ import { formatSize, truncateHead, type TruncationResult } from "@earendil-works
 export const MAX_FETCH_RESPONSE_BYTES = 5 * 1024 * 1024;
 export const DEFAULT_FETCH_TIMEOUT_SECONDS = 30;
 export const MAX_FETCH_TIMEOUT_SECONDS = 120;
-export const DEFAULT_SEARCH_TIMEOUT_MS = 25_000;
 
 export function isHttpUrl(url: string): boolean {
   return url.startsWith("http://") || url.startsWith("https://");

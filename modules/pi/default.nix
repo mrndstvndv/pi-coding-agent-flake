@@ -39,6 +39,7 @@ let
         "openai-codex/gpt-5.6-luna"          # luna (codex)
         "github-copilot/gpt-5.6-luna"        # luna (copilot)
         "openai-codex/gpt-5.6-sol"           # sol
+        "deepseek/deepseek-flash"
       ];
       hideThinkingBlock = true;
       showCacheMissNotices = true;
@@ -48,7 +49,7 @@ let
     // lib.optionalAttrs (piVersion != null) { lastChangelogVersion = piVersion; }
     // {
       packages =
-        [ "${piExtensions}" "../personal" ];
+        [ "${piExtensions}" "../personal" "npm:@earendil-works/pi-radius" ];
       theme = "terminal";
       themes = [ "~/.pi/agent/themes" ];
       modelThinkingLevels = {
