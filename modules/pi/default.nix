@@ -33,13 +33,20 @@ let
       defaultModel = "gpt-5.6-luna";
       defaultThinkingLevel = "xhigh";
       # Scope the model picker (Ctrl+P / /scoped-models) to a curated subset.
-      # Glob patterns match "provider/modelId" or a bare modelId.
+      # Glob patterns match "provider/modelId" or a bare modelId (minimatch,
+      # case-insensitive). Two rules matter here:
+      #   * `*` does NOT cross "/", so multi-slash ids
+      #     (commandcode/deepseek/deepseek-v4-flash, nvidia/deepseek-ai/*)
+      #     require `**`.
+      #   * enabledModels has no `!pattern` negation, so excluding a provider
+      #     means bounding the globs with an explicit provider brace list.
+      #     radius is intentionally absent from that list.
+      # Caveat: a newly added provider will not be scoped until it is added to
+      # the brace list below.
       enabledModels = [
-        "opencode/*"                     # all free opencode models
-        "openai-codex/gpt-5.6-luna"          # luna (codex)
-        "github-copilot/gpt-5.6-luna"        # luna (copilot)
-        "openai-codex/gpt-5.6-sol"           # sol
-        "deepseek/deepseek-flash"
+        "opencode/**"                        # all free opencode models
+        # luna + deepseek + sol + muse across every provider except radius
+        "{commandcode,deepseek,github-copilot,nvidia,openai-codex,opencode,openrouter}/**/{*luna*,*deepseek*,*-sol*,*muse*}"
         "openrouter/stealth/union-alpha"     # Union Alpha
       ];
       hideThinkingBlock = true;
