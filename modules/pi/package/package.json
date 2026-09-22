@@ -13,6 +13,7 @@
   "pi": {
     "extensions": [
       "./extensions/apply-patch/src/index.ts",
+      "./extensions/ask.ts",
       "./extensions/pi-notify.ts",
       "./extensions/session-age.ts",
       "./extensions/session-title.ts",
