@@ -46,8 +46,7 @@ let
       enabledModels = [
         "opencode/**"                        # all free opencode models
         # luna + deepseek + sol + muse across every provider except radius
-        "{commandcode,deepseek,github-copilot,nvidia,openai-codex,opencode,openrouter}/**/{*luna*,*deepseek*,*-sol*,*muse*}"
-        "openrouter/stealth/union-alpha"     # Union Alpha
+        "{commandcode,deepseek,github-copilot,nvidia,openai-codex,opencode}/**/{*luna*,*deepseek*,*-sol*,*muse*}"
         "**/*mimo-v2.6*"                     # MiMo 2.6 (radius ships no mimo models)
       ];
       hideThinkingBlock = true;
@@ -92,9 +91,6 @@ in
     "app.thinking.cycle" = [ "ctrl+t" ];
     "app.thinking.toggle" = [];
   };
-
-  # Custom provider model definitions
-  home.file.".pi/agent/models.json".source = ./models.json;
 
   # settings.json must stay writable (pi persists /setting changes there).
   # It can't be a home.file: that deploys a read-only store symlink, and once
