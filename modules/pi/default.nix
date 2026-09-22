@@ -1,5 +1,7 @@
 { pkgs, lib, config, piAgent ? null, ... }:
 let
+  system = pkgs.stdenv.hostPlatform.system;
+
   # Build the pi extensions package with its npm dependencies
   piExtensions = pkgs.buildNpmPackage {
     pname = "nixdots-pi-extensions";
@@ -13,19 +15,19 @@ let
     '';
   };
 
-  piPackageDefault = lib.attrByPath [ "packages" pkgs.system "default" ] null piAgent;
-  piPackageNamed = lib.attrByPath [ "packages" pkgs.system "pi" ] null piAgent;
+  piPackageDefault = lib.attrByPath [ "packages" system "default" ] null piAgent;
+  piPackageNamed = lib.attrByPath [ "packages" system "pi" ] null piAgent;
   piPackage =
     if piAgent == null then null
     else if piPackageDefault != null then piPackageDefault
     else if piPackageNamed != null then piPackageNamed
-    else throw "piAgent flake must expose packages.${pkgs.system}.default or packages.${pkgs.system}.pi";
+    else throw "piAgent flake must expose packages.${system}.default or packages.${system}.pi";
 
   piVersion =
     if piPackage == null then null
     else if piPackage ? version then piPackage.version
     else if lib.hasAttrByPath [ "lib" "version" ] piAgent then piAgent.lib.version
-    else throw "piAgent flake must expose a pi package version via packages.${pkgs.system}.*.version or lib.version";
+    else throw "piAgent flake must expose a pi package version via packages.${system}.*.version or lib.version";
   piSettingsFinal =
     {
       lsp.hookMode = "edit_write";
