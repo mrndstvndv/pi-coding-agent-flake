@@ -6,8 +6,9 @@
  *     dist/bundle/cli.js actually executes since aa47207)
  *
  * Patched behavior:
- *   1. Stats line shows only context usage. Token counts (↑↓ R W CH), cost,
- *      and the xp badge are dropped; the model name stays right-aligned.
+ *   1. Stats line shows context usage, cost, and cache hit rate (CH).
+ *      Raw token counts (↑↓ R W) and the xp badge are dropped; the model
+ *      name stays right-aligned.
  *   2. First line shows the cwd basename with extension statuses
  *      (ctx.ui.setStatus) right-aligned instead of on a separate line.
  *
@@ -33,7 +34,9 @@ const chunksDir = path.join(distRoot, "bundle", "chunks");
 // --- Unbundled (dist/modes) markers -----------------------------------------
 
 const STATS_MARKER = `        let statsLeft = statsParts.join(" ");`;
-const STATS_REPLACEMENT = `        let statsLeft = contextPercentStr;`;
+const STATS_REPLACEMENT = `        let statsLeft = statsParts
+            .filter((part) => /^(CH|\\$)|%\\/|\\?\\//.test(part))
+            .join(" ");`;
 
 const PWD_MARKER = `        const pwdLine = truncateToWidth(theme.fg("dim", pwd), width, theme.fg("dim", "..."));
         const lines = [pwdLine, dimStatsLeft + dimRemainder];
@@ -76,14 +79,14 @@ const PWD_REPLACEMENT = `        // Patched by pi-coding-agent-flake: statuses r
 // --- Bundled (dist/bundle/chunks) markers -----------------------------------
 
 const BUNDLED_STATS_MARKER = `let statsLeft=statsParts.join(" ")`;
-const BUNDLED_STATS_REPLACEMENT = `let statsLeft=contextPercentStr`;
+const BUNDLED_STATS_REPLACEMENT = `let statsLeft=statsParts.filter(part=>/^(CH|\\$)|%\\/|\\?\\//.test(part)).join(" ")`;
 
 const BUNDLED_PWD_MARKER = `lines=[truncateToWidth(theme.fg("dim",pwd),width,theme.fg("dim","...")),dimStatsLeft+dimRemainder],extensionStatuses=this.footerData.getExtensionStatuses();if(extensionStatuses.size>0){let statusLine=Array.from(extensionStatuses.entries()).sort(([a],[b2])=>a.localeCompare(b2)).map(([,text])=>sanitizeStatusText(text)).join(" ");lines.push(truncateToWidth(statusLine,width,theme.fg("dim","...")))}`;
 
 const BUNDLED_PWD_REPLACEMENT = `extensionStatuses=this.footerData.getExtensionStatuses(),pwdLine=(()=>{let shortPwd=pwd.replace(/[\\/]+$/,"").split("/").at(-1)||pwd,pwdStyled=theme.fg("dim",shortPwd);if(extensionStatuses.size===0)return truncateToWidth(pwdStyled,width,theme.fg("dim","..."));let statusText=truncateToWidth(Array.from(extensionStatuses.entries()).sort(([a],[b2])=>a.localeCompare(b2)).map(([,text])=>sanitizeStatusText(text)).join(" "),width,theme.fg("dim","...")),statusTextWidth=visibleWidth(statusText),availablePwdWidth=width-statusTextWidth-2;if(availablePwdWidth<10)return statusText;let pwdTruncated=truncateToWidth(pwdStyled,availablePwdWidth,theme.fg("dim","...")),gap=Math.max(2,width-visibleWidth(pwdTruncated)-statusTextWidth);return pwdTruncated+" ".repeat(gap)+statusText})(),lines=[pwdLine,dimStatsLeft+dimRemainder];`;
 
 const PATCHES = [
-  { name: "stats line (context usage only)", unbundled: [STATS_MARKER, STATS_REPLACEMENT], bundled: [BUNDLED_STATS_MARKER, BUNDLED_STATS_REPLACEMENT] },
+  { name: "stats line (context + cost + cache hit rate)", unbundled: [STATS_MARKER, STATS_REPLACEMENT], bundled: [BUNDLED_STATS_MARKER, BUNDLED_STATS_REPLACEMENT] },
   { name: "pwd basename + right-aligned statuses", unbundled: [PWD_MARKER, PWD_REPLACEMENT], bundled: [BUNDLED_PWD_MARKER, BUNDLED_PWD_REPLACEMENT] },
 ];
 
