@@ -48,6 +48,7 @@ let
         # luna + deepseek + sol + muse across every provider except radius
         "{commandcode,deepseek,github-copilot,nvidia,openai-codex,opencode,openrouter}/**/{*luna*,*deepseek*,*-sol*,*muse*}"
         "openrouter/stealth/union-alpha"     # Union Alpha
+        "**/*mimo-v2.6*"                     # MiMo 2.6 (radius ships no mimo models)
       ];
       hideThinkingBlock = true;
       showCacheMissNotices = true;
