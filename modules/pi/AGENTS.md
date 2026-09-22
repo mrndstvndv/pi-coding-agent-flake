@@ -42,10 +42,6 @@ function process(user: User | null) {
 - Search: `gh search code --repo owner/repo "query"`
 - Read: `gh api -H "Accept: application/vnd.github.v3.raw" /repos/owner/repo/contents/path/to/file`
 
-## Search
-- Web Search: `ddgr --json "query"`
-- After running ddgr, you may use `web_fetch` to retrieve the full content of any search result URL if you need more details
-
 ## Tool Preferences
 - Use `uv` instead of `python` (e.g., `uv run script.py`)
 - Use `bun` instead of `node` or `npm`

@@ -69,9 +69,7 @@ let
     };
 in
 {
-  home.packages = with pkgs; [
-    ddgr
-  ] ++ lib.optionals (piPackage != null) [
+  home.packages = lib.optionals (piPackage != null) [
     piPackage
   ];
 
