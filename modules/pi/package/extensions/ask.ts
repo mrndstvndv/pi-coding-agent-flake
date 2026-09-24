@@ -187,6 +187,10 @@ export default function ask(pi: ExtensionAPI) {
 			const notifyText = questions.length === 1 ? questions[0].question : `${questions.length} questions`;
 			notify(`${NOTIFY_TITLE}: ${notifyText}`);
 
+			// The herdr agent-state integration only knows about pi's built-in prompts
+			// through the `herdr:blocked` bus event, so report the wait ourselves.
+			pi.events.emit("herdr:blocked", { active: true, label: notifyText });
+
 			const result = await ctx.ui.custom<{ answers: AskAnswer[] } | null>((tui, theme, _kb, done) => {
 				const editorTheme: EditorTheme = {
 					borderColor: (s) => theme.fg("accent", s),
@@ -388,6 +392,9 @@ export default function ask(pi: ExtensionAPI) {
 				}
 
 				return { render, handleInput, invalidate: () => {} };
+			}).finally(() => {
+				// Clear the blocked state even when the prompt is cancelled or throws.
+				pi.events.emit("herdr:blocked", { active: false });
 			});
 
 			notify("Input received — resuming task", "3000");
