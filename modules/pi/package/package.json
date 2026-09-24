@@ -2,18 +2,22 @@
   "name": "nixdots-pi-extensions",
   "version": "1.0.0",
   "description": "Pi extensions for nixdots config",
-  "keywords": ["pi-package"],
+  "keywords": [
+    "pi-package"
+  ],
   "type": "module",
   "dependencies": {
+    "@ff-labs/fff-node": "^0.11.0",
     "@types/turndown": "^5.0.6",
     "diff": "^9.0.0",
-    "typebox": "1.3.7",
-    "turndown": "^7.2.2"
+    "turndown": "^7.2.2",
+    "typebox": "1.3.7"
   },
   "pi": {
     "extensions": [
       "./extensions/apply-patch/src/index.ts",
       "./extensions/ask.ts",
+      "./extensions/fff-attach.ts",
       "./extensions/pi-notify.ts",
       "./extensions/session-age.ts",
       "./extensions/session-title.ts",
