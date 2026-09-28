@@ -22,7 +22,10 @@ import { BorderedLoader, convertToLlm, serializeConversation } from "@earendil-w
 const AGY_COMMAND = "agy";
 const AGY_MODEL = "gemini-3.8-flash-high";
 const AGY_EFFORT = "high";
-const AGY_PRINT_TIMEOUT = "5m";
+// "0" waits until the turn completes. Handoffs carry the whole transcript, so a
+// large session can legitimately take longer than a fixed deadline. The loader is
+// abortable (Esc SIGTERM/SIGKILLs agy), so an unbounded wait is safe here.
+const AGY_PRINT_TIMEOUT = "0";
 const MAX_ERROR_OUTPUT_LENGTH = 2000;
 
 // Node rejects spawn arguments containing NUL bytes. Transcripts pick them up from
@@ -173,15 +176,24 @@ function runAgyPrompt(
 				AGY_MODEL,
 				"--effort",
 				AGY_EFFORT,
-				"--print",
-				stripNullBytes(prompt),
+				// Prompt goes over stdin (--input-format text) instead of --print argv.
+				// argv is limited by kern.argmax (~1MB on macOS), so large transcripts
+				// fail with spawn E2BIG. stdin has no such limit.
+				"--input-format",
+				"text",
 				"--output-format",
 				"json",
 				"--print-timeout",
 				AGY_PRINT_TIMEOUT,
 			],
-			{ cwd: os.tmpdir(), stdio: ["ignore", "pipe", "pipe"] },
+			{ cwd: os.tmpdir(), stdio: ["pipe", "pipe", "pipe"] },
 		);
+		child.stdin.on("error", () => {
+			// Ignored: happens when agy exits early (e.g. auth failure) while
+			// the prompt is still being written. The close handler reports it.
+		});
+		child.stdin.write(stripNullBytes(prompt));
+		child.stdin.end();
 		let output = "";
 		let diagnostics = "";
 		let aborted = false;
