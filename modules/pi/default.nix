@@ -31,8 +31,8 @@ let
   piSettingsFinal =
     {
       lsp.hookMode = "edit_write";
-      defaultProvider = "opencode";
-      defaultModel = "mimo-v2.6-flash-free";
+      defaultProvider = "commandcode";
+      defaultModel = "deepseek/deepseek-v4.1-flash";
       defaultThinkingLevel = "xhigh";
       # Scope the model picker (Ctrl+P / /scoped-models) to a curated subset.
       # Glob patterns match "provider/modelId" or a bare modelId (minimatch,
@@ -51,10 +51,10 @@ let
         "{commandcode,deepseek,github-copilot,nvidia,openai-codex,opencode}/**/{*luna*,*deepseek*,*-sol*,*muse*}"
         "**/*mimo-v2.6*"                     # MiMo 2.6 (radius ships no mimo models)
       ];
-      hideThinkingBlock = true;
+      hideThinkingBlock = false;
       showCacheMissNotices = true;
       quietStartup = true;
-      showHardwareCursor = true;
+      showHardwareCursor = false;
     }
     // lib.optionalAttrs (piVersion != null) { lastChangelogVersion = piVersion; }
     // {
@@ -67,6 +67,7 @@ let
         "github-copilot/gpt-5.6-luna" = "max";
         "openai-codex/gpt-5.6-sol" = "high";
         "opencode/mimo-v2.6-flash-free" = "xhigh";
+        "commandcode/deepseek/deepseek-v4.1-flash" = "max";
       };
     };
 in
