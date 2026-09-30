@@ -52,6 +52,9 @@ let
         "**/*mimo-v2.6*"                     # MiMo 2.6 (radius ships no mimo models)
       ];
       hideThinkingBlock = false;
+      # Add codemode on top of the defaults (read/bash/edit/write) so the
+      # model can run JS in a QuickJS sandbox that calls tools in parallel.
+      defaultTools = [ "+codemode" ];
       showCacheMissNotices = true;
       quietStartup = true;
       showHardwareCursor = false;
