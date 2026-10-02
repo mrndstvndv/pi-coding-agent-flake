@@ -42,6 +42,15 @@ let
     hideThinkingBlock = false;
     showCacheMissNotices = true;
   };
+
+  # Radius MCP replaces the deprecated npm:@earendil-works/pi-radius
+  # extensions. `auth.provider` reuses the radius credential from auth.json.
+  piMcpFinal = {
+    mcpServers.radius = {
+      url = "https://radius.pi.dev/mcp";
+      auth.provider = "radius";
+    };
+  };
   piSettingsFinal =
     {
       lsp.hookMode = "edit_write";
@@ -76,7 +85,7 @@ let
     // lib.optionalAttrs (piVersion != null) { lastChangelogVersion = piVersion; }
     // {
       packages =
-        [ "${piExtensions}" "../personal" "npm:@earendil-works/pi-radius" ];
+        [ "${piExtensions}" "../personal" ];
       theme = "terminal";
       themes = [ "~/.pi/agent/themes" ];
       modelThinkingLevels = {
@@ -119,6 +128,13 @@ in
   home.activation.makePiSettingsWritable = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
     $DRY_RUN_CMD install -m 0644 "${pkgs.writeText "pi-settings.json" (builtins.toJSON piSettingsFinal)}" "$HOME/.pi/agent/.settings.json.tmp"
     $DRY_RUN_CMD mv -f "$HOME/.pi/agent/.settings.json.tmp" "$HOME/.pi/agent/settings.json"
+  '';
+
+  # mcp.json stays writable like settings.json: declarative servers win on
+  # rebuild, while `pi mcp add` and /login edits survive until the next switch.
+  home.activation.makePiMcpWritable = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+    $DRY_RUN_CMD install -m 0600 "${pkgs.writeText "pi-mcp.json" (builtins.toJSON piMcpFinal)}" "$HOME/.pi/agent/.mcp.json.tmp"
+    $DRY_RUN_CMD mv -f "$HOME/.pi/agent/.mcp.json.tmp" "$HOME/.pi/agent/mcp.json"
   '';
 
   # Durable agent dir: settings.json stays writable (same reason as pi's),
