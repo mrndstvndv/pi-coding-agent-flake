@@ -69,11 +69,12 @@
         inherit version;
       };
 
-      # Inject the pinned monorepo source as a module argument so the module
-      # can build the durable agent without consumers wiring another input.
-      homeManagerModules.default = {
+      # Inject the durable package built with this flake's pinned nixpkgs and
+      # monorepo source, so consumers don't need extra inputs and the pinned
+      # npmDepsHash always matches the toolchain that builds it.
+      homeManagerModules.default = { pkgs, ... }: {
         imports = [ ./modules/pi/default.nix ];
-        _module.args.piMonorepo = piMonorepo;
+        _module.args.piDurable = mkPiDurable pkgs.stdenv.hostPlatform.system;
       };
 
       packages = forAllSystems (system: {

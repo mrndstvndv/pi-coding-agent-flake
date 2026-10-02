@@ -1,4 +1,4 @@
-{ pkgs, lib, config, piAgent ? null, piMonorepo ? null, ... }:
+{ pkgs, lib, config, piAgent ? null, piDurable ? null, ... }:
 let
   system = pkgs.stdenv.hostPlatform.system;
 
@@ -29,11 +29,9 @@ let
     else if lib.hasAttrByPath [ "lib" "version" ] piAgent then piAgent.lib.version
     else throw "piAgent flake must expose a pi package version via packages.${system}.*.version or lib.version";
 
-  # The experimental durable coding agent from the pinned Pi monorepo. It does
-  # not load pi extensions, so it gets its own agent dir under ~/.pi/durable.
-  piDurable =
-    if piMonorepo == null then null
-    else pkgs.callPackage ../../pkgs/pi-durable.nix { inherit piMonorepo; };
+  # The experimental durable coding agent from the pinned Pi monorepo, injected
+  # by this flake's homeManagerModules.default. It does not load pi extensions,
+  # so it gets its own agent dir under ~/.pi/durable.
   piDurableSettings = {
     defaultProvider = "commandcode";
     defaultModel = "deepseek/deepseek-v4.1-flash";
