@@ -8,9 +8,7 @@
   "type": "module",
   "dependencies": {
     "@ff-labs/fff-node": "^0.11.0",
-    "@types/turndown": "^5.0.6",
-    "diff": "^9.0.0",
-    "turndown": "^7.2.2"
+    "diff": "^9.0.0"
   },
   "peerDependencies": {
     "typebox": "*"
@@ -28,8 +26,7 @@
       "./extensions/pi-notify.ts",
       "./extensions/session-age.ts",
       "./extensions/session-title.ts",
-      "./extensions/handoff.ts",
-      "./extensions/web-fetch.ts"
+      "./extensions/handoff.ts"
     ]
   }
 }
