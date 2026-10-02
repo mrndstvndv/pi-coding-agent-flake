@@ -69,7 +69,12 @@
         inherit version;
       };
 
-      homeManagerModules.default = args: import ./modules/pi/default.nix (args // { inherit piMonorepo; });
+      # Inject the pinned monorepo source as a module argument so the module
+      # can build the durable agent without consumers wiring another input.
+      homeManagerModules.default = {
+        imports = [ ./modules/pi/default.nix ];
+        _module.args.piMonorepo = piMonorepo;
+      };
 
       packages = forAllSystems (system: {
         default = mkPi system;
