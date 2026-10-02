@@ -3,9 +3,14 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    # Pinned Pi monorepo source for the experimental durable coding agent.
+    piMonorepo = {
+      url = "github:earendil-works/pi/v1.0.0";
+      flake = false;
+    };
   };
 
-  outputs = { self, nixpkgs }:
+  outputs = { self, nixpkgs, piMonorepo }:
     let
       lib = nixpkgs.lib;
       systems = [
@@ -54,17 +59,22 @@
             platforms = platforms.unix;
           };
         };
+      mkPiDurable = system:
+        nixpkgs.legacyPackages.${system}.callPackage ./pkgs/pi-durable.nix {
+          inherit piMonorepo;
+        };
     in
     {
       lib = {
         inherit version;
       };
 
-      homeManagerModules.default = import ./modules/pi/default.nix;
+      homeManagerModules.default = args: import ./modules/pi/default.nix (args // { inherit piMonorepo; });
 
       packages = forAllSystems (system: {
         default = mkPi system;
         pi = mkPi system;
+        pi-durable = mkPiDurable system;
       });
     };
 }

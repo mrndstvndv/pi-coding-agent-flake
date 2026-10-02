@@ -1,4 +1,4 @@
-{ pkgs, lib, config, piAgent ? null, ... }:
+{ pkgs, lib, config, piAgent ? null, piMonorepo ? null, ... }:
 let
   system = pkgs.stdenv.hostPlatform.system;
 
@@ -28,6 +28,22 @@ let
     else if piPackage ? version then piPackage.version
     else if lib.hasAttrByPath [ "lib" "version" ] piAgent then piAgent.lib.version
     else throw "piAgent flake must expose a pi package version via packages.${system}.*.version or lib.version";
+
+  # The experimental durable coding agent from the pinned Pi monorepo. It does
+  # not load pi extensions, so it gets its own agent dir under ~/.pi/durable.
+  piDurable =
+    if piMonorepo == null then null
+    else pkgs.callPackage ../../pkgs/pi-durable.nix { inherit piMonorepo; };
+  piDurableSettings = {
+    defaultProvider = "commandcode";
+    defaultModel = "deepseek/deepseek-v4.1-flash";
+    defaultThinkingLevel = "xhigh";
+    modelThinkingLevels."commandcode/deepseek/deepseek-v4.1-flash" = "max";
+    theme = "terminal";
+    themes = [ "~/.pi/durable/agent/themes" ];
+    hideThinkingBlock = false;
+    showCacheMissNotices = true;
+  };
   piSettingsFinal =
     {
       lsp.hookMode = "edit_write";
@@ -77,7 +93,7 @@ in
 {
   home.packages = lib.optionals (piPackage != null) [
     piPackage
-  ];
+  ] ++ lib.optional (piDurable != null) piDurable;
 
   home.file.".pi/agent/AGENTS.md".source = ./AGENTS.md;
 
@@ -106,4 +122,19 @@ in
     $DRY_RUN_CMD install -m 0644 "${pkgs.writeText "pi-settings.json" (builtins.toJSON piSettingsFinal)}" "$HOME/.pi/agent/.settings.json.tmp"
     $DRY_RUN_CMD mv -f "$HOME/.pi/agent/.settings.json.tmp" "$HOME/.pi/agent/settings.json"
   '';
+
+  # Durable agent dir: settings.json stays writable (same reason as pi's),
+  # auth/AGENTS.md/skills/themes link back to pi, and models.json is generated
+  # from pi's persisted commandcode catalog plus the CLI's API key. Regenerated
+  # on every switch; pi-durable-models refreshes it after /commandcode-refresh.
+  home.activation.setupPiDurable = lib.hm.dag.entryAfter [ "writeBoundary" ] (lib.optionalString (piDurable != null) ''
+    $DRY_RUN_CMD mkdir -p "$HOME/.pi/durable/agent"
+    $DRY_RUN_CMD install -m 0644 "${pkgs.writeText "pi-durable-settings.json" (builtins.toJSON piDurableSettings)}" "$HOME/.pi/durable/agent/.settings.json.tmp"
+    $DRY_RUN_CMD mv -f "$HOME/.pi/durable/agent/.settings.json.tmp" "$HOME/.pi/durable/agent/settings.json"
+    $DRY_RUN_CMD ln -sfn "$HOME/.pi/agent/auth.json" "$HOME/.pi/durable/agent/auth.json"
+    $DRY_RUN_CMD ln -sfn "$HOME/.pi/agent/AGENTS.md" "$HOME/.pi/durable/agent/AGENTS.md"
+    $DRY_RUN_CMD ln -sfn "$HOME/.pi/agent/skills" "$HOME/.pi/durable/agent/skills"
+    $DRY_RUN_CMD ln -sfn "$HOME/.pi/agent/themes" "$HOME/.pi/durable/agent/themes"
+    $DRY_RUN_CMD ${piDurable}/bin/pi-durable-models || true
+  '');
 }
