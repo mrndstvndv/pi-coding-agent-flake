@@ -22,7 +22,7 @@
       forAllSystems = lib.genAttrs systems;
       packageManifest = builtins.fromJSON (builtins.readFile ./package/package.json);
       version = packageManifest.dependencies."@earendil-works/pi-coding-agent";
-      npmDepsHash = "sha256-XTm3LKK+bmoWD+m326q+3JDPHipf3Dmk5cc4Ay75knU=";
+      npmDepsHash = "sha256-9XEDj2RpgqQArPLos9oKOIJUIn2LVjc+3DcNCg7lmE8=";
 
       mkPi = system:
         let
