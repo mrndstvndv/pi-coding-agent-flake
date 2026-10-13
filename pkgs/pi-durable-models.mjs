@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Generates <agent dir>/models.json for the Pi Durable agent. The durable
 // harness does not load pi extensions, so the Command Code provider normally
-// registered by ~/.pi/personal/extensions/commandcode.ts is mirrored here from
+// registered by modules/pi/package/extensions/commandcode.ts is mirrored here from
 // pi's persisted catalog and the CLI's own API key.
 //
 // Rerun after `/commandcode-refresh` in pi; the home-manager activation runs it
