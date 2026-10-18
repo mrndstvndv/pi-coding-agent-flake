@@ -54,8 +54,8 @@ let
   piSettingsFinal =
     {
       lsp.hookMode = "edit_write";
-      defaultProvider = "commandcode";
-      defaultModel = "deepseek/deepseek-v4.1-flash";
+      defaultProvider = "openai-codex";
+      defaultModel = "gpt-6-luna";
       defaultThinkingLevel = "xhigh";
       # Scope the model picker (Ctrl+P / /scoped-models) to a curated subset.
       # Glob patterns match "provider/modelId" or a bare modelId (minimatch,
@@ -69,18 +69,18 @@ let
       # Caveat: a newly added provider will not be scoped until it is added to
       # the brace list below.
       enabledModels = [
-        "opencode/**"                        # all free opencode models
         # luna + deepseek + sol + muse across every provider except radius
         "{commandcode,deepseek,github-copilot,nvidia,openai-codex,opencode}/**/{*luna*,*deepseek*,*-sol*,*muse*}"
         "**/*mimo-v2.6*"                     # MiMo 2.6 (radius ships no mimo models)
       ];
-      hideThinkingBlock = false;
+      hideThinkingBlock = true;
       # Add codemode on top of the defaults (read/bash/edit/write) so the
       # model can run JS in a QuickJS sandbox that calls tools in parallel.
       defaultTools = [ "+codemode" ];
       showCacheMissNotices = true;
       quietStartup = true;
       showHardwareCursor = false;
+      tuiMode = "regular";
     }
     // lib.optionalAttrs (piVersion != null) { lastChangelogVersion = piVersion; }
     // {
@@ -94,6 +94,9 @@ let
         "openai-codex/gpt-5.6-sol" = "high";
         "opencode/mimo-v2.6-flash-free" = "xhigh";
         "commandcode/deepseek/deepseek-v4.1-flash" = "max";
+        "openai-codex/gpt-6-luna" = "max";
+        "openai-codex/gpt-6-sol" = "medium";
+        "commandcode/deepseek/deepseek-v4-flash" = "max";
       };
     };
 in
