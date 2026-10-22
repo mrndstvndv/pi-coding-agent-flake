@@ -15,6 +15,10 @@ let
     '';
   };
 
+  subagentCli = pkgs.writeShellScriptBin "subagent" ''
+    exec ${pkgs.nodejs_24}/bin/node ${piExtensions}/extensions/subagent/subagent.ts "$@"
+  '';
+
   piPackageDefault = lib.attrByPath [ "packages" system "default" ] null piAgent;
   piPackageNamed = lib.attrByPath [ "packages" system "pi" ] null piAgent;
   piPackage =
@@ -103,7 +107,9 @@ in
 {
   home.packages = lib.optionals (piPackage != null) [
     piPackage
-  ] ++ lib.optional (piDurable != null) piDurable;
+  ] ++ lib.optional (piDurable != null) piDurable ++ [
+    subagentCli
+  ];
 
   home.file.".pi/agent/AGENTS.md".source = ./AGENTS.md;
 
