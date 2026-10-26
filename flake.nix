@@ -40,6 +40,8 @@
 
             ${pkgs.nodejs_24}/bin/node patch-footer.mjs
             ${pkgs.nodejs_24}/bin/node patch-alt-scroll.mjs
+            PI_RESIZE_TEST_PACKAGE_ROOT="$PWD" ${pkgs.nodejs_24}/bin/node --test patch-main-screen-resize.test.mjs
+            ${pkgs.nodejs_24}/bin/node patch-main-screen-resize.mjs
 
             mkdir -p $out/bin $out/lib
             cp -r node_modules $out/lib/
@@ -47,7 +49,8 @@
 
             makeWrapper ${pkgs.nodejs_24}/bin/node $out/bin/pi \
               --add-flags "$out/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js" \
-              --set-default PI_PACKAGE_DIR "$out/lib/node_modules/@earendil-works/pi-coding-agent"
+              --set-default PI_PACKAGE_DIR "$out/lib/node_modules/@earendil-works/pi-coding-agent" \
+              --set-default PI_TUI_INCREMENTAL_HEIGHT_RESIZE 1
 
             runHook postInstall
           '';
