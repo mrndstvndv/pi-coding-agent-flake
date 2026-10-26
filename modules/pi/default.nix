@@ -54,6 +54,7 @@ let
       url = "https://radius.pi.dev/mcp";
       auth.provider = "radius";
     };
+    mcpServers.superlogical.url = "https://www.superlogical.com/rex/community-mcp";
   };
   piSettingsFinal =
     {
@@ -100,6 +101,7 @@ let
         "commandcode/deepseek/deepseek-v4.1-flash" = "max";
         "openai-codex/gpt-6-luna" = "max";
         "openai-codex/gpt-6-sol" = "medium";
+        "openai-codex/gpt-6.1-sol" = "low";
         "commandcode/deepseek/deepseek-v4-flash" = "max";
       };
     };
