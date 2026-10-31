@@ -3,14 +3,9 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
-    # Pinned Pi monorepo source for the experimental durable coding agent.
-    piMonorepo = {
-      url = "github:earendil-works/pi/v1.0.0";
-      flake = false;
-    };
   };
 
-  outputs = { self, nixpkgs, piMonorepo }:
+  outputs = { nixpkgs, ... }:
     let
       lib = nixpkgs.lib;
       systems = [
@@ -62,28 +57,19 @@
             platforms = platforms.unix;
           };
         };
-      mkPiDurable = system:
-        nixpkgs.legacyPackages.${system}.callPackage ./pkgs/pi-durable.nix {
-          inherit piMonorepo;
-        };
     in
     {
       lib = {
         inherit version;
       };
 
-      # Inject the durable package built with this flake's pinned nixpkgs and
-      # monorepo source, so consumers don't need extra inputs and the pinned
-      # npmDepsHash always matches the toolchain that builds it.
-      homeManagerModules.default = { pkgs, ... }: {
+      homeManagerModules.default = { ... }: {
         imports = [ ./modules/pi/default.nix ];
-        _module.args.piDurable = mkPiDurable pkgs.stdenv.hostPlatform.system;
       };
 
       packages = forAllSystems (system: {
         default = mkPi system;
         pi = mkPi system;
-        pi-durable = mkPiDurable system;
       });
     };
 }

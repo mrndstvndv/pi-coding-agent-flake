@@ -1,4 +1,4 @@
-{ pkgs, lib, config, piAgent ? null, piDurable ? null, ... }:
+{ pkgs, lib, config, piAgent ? null, ... }:
 let
   system = pkgs.stdenv.hostPlatform.system;
 
@@ -33,20 +33,6 @@ let
     else if lib.hasAttrByPath [ "lib" "version" ] piAgent then piAgent.lib.version
     else throw "piAgent flake must expose a pi package version via packages.${system}.*.version or lib.version";
 
-  # The experimental durable coding agent from the pinned Pi monorepo, injected
-  # by this flake's homeManagerModules.default. It does not load pi extensions,
-  # so it gets its own agent dir under ~/.pi/durable.
-  piDurableSettings = {
-    defaultProvider = "commandcode";
-    defaultModel = "deepseek/deepseek-v4.1-flash";
-    defaultThinkingLevel = "xhigh";
-    modelThinkingLevels."commandcode/deepseek/deepseek-v4.1-flash" = "max";
-    theme = "terminal";
-    themes = [ "~/.pi/durable/agent/themes" ];
-    hideThinkingBlock = false;
-    showCacheMissNotices = true;
-  };
-
   # Radius MCP replaces the deprecated npm:@earendil-works/pi-radius
   # extensions. `auth.provider` reuses the radius credential from auth.json.
   piMcpFinal = {
@@ -62,23 +48,6 @@ let
       defaultProvider = "openai-codex";
       defaultModel = "gpt-6-luna";
       defaultThinkingLevel = "xhigh";
-      # Scope the model picker (Ctrl+P / /scoped-models) to a curated subset.
-      # Glob patterns match "provider/modelId" or a bare modelId (minimatch,
-      # case-insensitive). Two rules matter here:
-      #   * `*` does NOT cross "/", so multi-slash ids
-      #     (commandcode/deepseek/deepseek-v4-flash, nvidia/deepseek-ai/*)
-      #     require `**`.
-      #   * enabledModels has no `!pattern` negation, so excluding a provider
-      #     means bounding the globs with an explicit provider brace list.
-      #     radius is intentionally absent from that list.
-      # Caveat: a newly added provider will not be scoped until it is added to
-      # the brace list below.
-      enabledModels = [
-        # All DeepRelay models, plus luna + deepseek + sol + muse across other providers.
-        "{commandcode,deeprelay,deepseek,github-copilot,nvidia,openai-codex,opencode}/**/{*luna*,*deepseek*,*-sol*,*muse*}"
-        "deeprelay/**"
-        "**/*mimo-v2.6*"                     # MiMo 2.6 (radius ships no mimo models)
-      ];
       hideThinkingBlock = true;
       # Add codemode on top of the defaults (read/bash/edit/write) so the
       # model can run JS in a QuickJS sandbox that calls tools in parallel.
@@ -99,18 +68,16 @@ let
         "github-copilot/gpt-5.6-luna" = "max";
         "openai-codex/gpt-5.6-sol" = "high";
         "opencode/mimo-v2.6-flash-free" = "xhigh";
-        "commandcode/deepseek/deepseek-v4.1-flash" = "max";
         "openai-codex/gpt-6-luna" = "max";
         "openai-codex/gpt-6-sol" = "medium";
         "openai-codex/gpt-6.1-sol" = "low";
-        "commandcode/deepseek/deepseek-v4-flash" = "max";
       };
     };
 in
 {
   home.packages = lib.optionals (piPackage != null) [
     piPackage
-  ] ++ lib.optional (piDurable != null) piDurable ++ [
+  ] ++ [
     subagentCli
   ];
 
@@ -150,18 +117,4 @@ in
     $DRY_RUN_CMD mv -f "$HOME/.pi/agent/.mcp.json.tmp" "$HOME/.pi/agent/mcp.json"
   '';
 
-  # Durable agent dir: settings.json stays writable (same reason as pi's),
-  # auth/AGENTS.md/skills/themes link back to pi, and models.json is generated
-  # from pi's persisted commandcode catalog plus the CLI's API key. Regenerated
-  # on every switch; pi-durable-models refreshes it after /commandcode-refresh.
-  home.activation.setupPiDurable = lib.hm.dag.entryAfter [ "writeBoundary" ] (lib.optionalString (piDurable != null) ''
-    $DRY_RUN_CMD mkdir -p "$HOME/.pi/durable/agent"
-    $DRY_RUN_CMD install -m 0644 "${pkgs.writeText "pi-durable-settings.json" (builtins.toJSON piDurableSettings)}" "$HOME/.pi/durable/agent/.settings.json.tmp"
-    $DRY_RUN_CMD mv -f "$HOME/.pi/durable/agent/.settings.json.tmp" "$HOME/.pi/durable/agent/settings.json"
-    $DRY_RUN_CMD ln -sfn "$HOME/.pi/agent/auth.json" "$HOME/.pi/durable/agent/auth.json"
-    $DRY_RUN_CMD ln -sfn "$HOME/.pi/agent/AGENTS.md" "$HOME/.pi/durable/agent/AGENTS.md"
-    $DRY_RUN_CMD ln -sfn "$HOME/.pi/agent/skills" "$HOME/.pi/durable/agent/skills"
-    $DRY_RUN_CMD ln -sfn "$HOME/.pi/agent/themes" "$HOME/.pi/durable/agent/themes"
-    $DRY_RUN_CMD ${piDurable}/bin/pi-durable-models || true
-  '');
 }
