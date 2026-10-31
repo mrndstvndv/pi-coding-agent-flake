@@ -74,8 +74,9 @@ let
       # Caveat: a newly added provider will not be scoped until it is added to
       # the brace list below.
       enabledModels = [
-        # luna + deepseek + sol + muse across every provider except radius
-        "{commandcode,deepseek,github-copilot,nvidia,openai-codex,opencode}/**/{*luna*,*deepseek*,*-sol*,*muse*}"
+        # All DeepRelay models, plus luna + deepseek + sol + muse across other providers.
+        "{commandcode,deeprelay,deepseek,github-copilot,nvidia,openai-codex,opencode}/**/{*luna*,*deepseek*,*-sol*,*muse*}"
+        "deeprelay/**"
         "**/*mimo-v2.6*"                     # MiMo 2.6 (radius ships no mimo models)
       ];
       hideThinkingBlock = true;
@@ -114,6 +115,7 @@ in
   ];
 
   home.file.".pi/agent/AGENTS.md".source = ./AGENTS.md;
+  home.file.".pi/agent/models.json".source = ./models.json;
 
   # Skills - symlink entire directory
   home.file.".pi/agent/skills".source = ./skills;
