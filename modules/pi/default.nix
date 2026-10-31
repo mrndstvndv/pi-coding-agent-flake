@@ -15,10 +15,6 @@ let
     '';
   };
 
-  subagentCli = pkgs.writeShellScriptBin "subagent" ''
-    exec ${pkgs.nodejs_24}/bin/node ${piExtensions}/extensions/subagent/subagent.ts "$@"
-  '';
-
   piPackageDefault = lib.attrByPath [ "packages" system "default" ] null piAgent;
   piPackageNamed = lib.attrByPath [ "packages" system "pi" ] null piAgent;
   piPackage =
@@ -59,8 +55,10 @@ let
     }
     // lib.optionalAttrs (piVersion != null) { lastChangelogVersion = piVersion; }
     // {
-      packages =
-        [ "${piExtensions}" "../personal" ];
+      packages = [
+        "${piExtensions}"
+        "../personal"
+      ];
       theme = "terminal";
       themes = [ "~/.pi/agent/themes" ];
       modelThinkingLevels = {
@@ -75,11 +73,7 @@ let
     };
 in
 {
-  home.packages = lib.optionals (piPackage != null) [
-    piPackage
-  ] ++ [
-    subagentCli
-  ];
+  home.packages = lib.optionals (piPackage != null) [ piPackage ];
 
   home.file.".pi/agent/AGENTS.md".source = ./AGENTS.md;
   home.file.".pi/agent/models.json".source = ./models.json;

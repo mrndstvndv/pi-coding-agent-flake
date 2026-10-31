@@ -17,7 +17,6 @@ Nix flake packaging [pi](https://github.com/earendil-works/pi-mono) coding agent
 │   │   └── extensions/
 │   │       ├── lsp/                   # LSP integration
 │   │       ├── pi-rewind/             # Session rewind
-│   │       ├── subagent/              # Herdr-managed Pi subagents + bundled skill
 │   │       ├── web-fetch.ts           # Web fetch tool
 │   │       └── ...                    # Other extensions
 │   ├── skills/                        # Custom skills (SKILL.md discovery)
@@ -130,7 +129,6 @@ Extension notes:
 - Resources are registered in `package/package.json` under the `pi` key.
 - Local extension entrypoints should stay relative to the package root, e.g. `./extensions/web-fetch.ts`.
 - The module already uses this package for custom tooling like web fetch, LSP, notifications, and handoff helpers.
-- The subagent extension is Herdr-only: the parent Pi must run in a Herdr-managed pane (`HERDR_ENV=1`). It uses Herdr tabs and does not require tmux.
 
 ## Less obvious pi features
 
