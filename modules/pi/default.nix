@@ -75,6 +75,12 @@ in
 {
   home.packages = lib.optionals (piPackage != null) [ piPackage ];
 
+  # pi's OSC 7501 detection gates on the reply arriving while the support query
+  # is still pending; a lost or late reply leaves reporting off for the life of
+  # the process. Rex implements 7501 natively, tmux/screen never forward the
+  # reply, and every other terminal must ignore unknown OSCs, so report always.
+  home.sessionVariables.PI_PROGRAM_STATUS = "1";
+
   home.file.".pi/agent/AGENTS.md".source = ./AGENTS.md;
   home.file.".pi/agent/models.json".source = ./models.json;
 
