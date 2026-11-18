@@ -37,6 +37,14 @@ let
       auth.provider = "radius";
     };
     mcpServers.superlogical.url = "https://www.superlogical.com/rex/community-mcp";
+    # Reseam engine CLI (~/Dev/reseam/rex), installed via cargo install so it
+    # survives `cargo clean` (the target/release copy is what broke before).
+    mcpServers.rex = {
+      command = "~/.cargo/bin/rex";
+      args = [ "mcp" ];
+      env.JAVA_HOME = "/Users/steven/Library/Java/JavaVirtualMachines/corretto-23.0.2/Contents/Home";
+      description = "Read Android apps with the Reseam engine: overview, find strings, trace callers, show smali, check patch targets.";
+    };
   };
   piSettingsFinal =
     {
